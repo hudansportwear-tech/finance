@@ -1,1195 +1,880 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, increment } from 'firebase/firestore';
-import { 
-  LayoutDashboard, Banknote, FileText, TrendingUp, Target, Building2, Save, 
-  Plus, Trash2, Edit2, Download, Upload, Printer, X, FileSpreadsheet, File as FileIcon,
-  ChevronLeft, ChevronRight, Calendar, Filter, Package, ShoppingCart, Menu, LogOut, ArrowUpRight, ArrowDownRight, Wallet
-} from 'lucide-react';
-
-/* --- FIREBASE CONFIGURATION --- */
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-/* --- HELPER FUNCTIONS --- */
-const formatCurrency = (amount) => {
-  const num = parseFloat(amount) || 0;
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
-  }).format(Math.abs(num));
-};
-
-const formatDate = (dateString) => {
-  if (!dateString) return '-';
-  // Handle Excel date number format roughly if string passes through
-  if (!isNaN(dateString) && !dateString.toString().includes('-')) {
-       return new Date(Math.round((dateString - 25569)*86400*1000)).toLocaleDateString('id-ID');
-  }
-  return new Date(dateString).toLocaleDateString('id-ID', { 
-    day: '2-digit', 
-    month: 'short', 
-    year: 'numeric' 
-  });
-};
-
-const loadScript = (src) => {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = src;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-};
-
-/* --- UI COMPONENTS --- */
-const SidebarItem = ({ icon: Icon, label, active, onClick }) => (
-    <button 
-        onClick={onClick}
-        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group font-medium text-sm
-        ${active 
-            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' 
-            : 'text-slate-500 hover:bg-slate-100 hover:text-indigo-600'}`}
-    >
-        <Icon size={20} className={active ? 'text-white' : 'text-slate-400 group-hover:text-indigo-600'} />
-        <span>{label}</span>
-        {active && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white"></div>}
-    </button>
-);
-
-const MobileNavItem = ({ icon: Icon, label, active, onClick }) => (
-    <button 
-        onClick={onClick}
-        className={`flex flex-col items-center justify-center p-2 rounded-lg transition-colors
-        ${active ? 'text-indigo-600' : 'text-slate-400'}`}
-    >
-        <Icon size={20} className={active ? 'mb-1' : 'mb-1'} strokeWidth={active ? 2.5 : 2} />
-        <span className="text-[10px] font-medium">{label}</span>
-    </button>
-);
-
-const Card = ({ children, className = "", title, subtitle, action }) => (
-    <div className={`bg-white rounded-2xl p-6 shadow-sm border border-slate-100 ${className}`}>
-        {(title || action) && (
-            <div className="flex justify-between items-start mb-6">
-                <div>
-                    {title && <h3 className="text-lg font-bold text-slate-800 tracking-tight">{title}</h3>}
-                    {subtitle && <p className="text-sm text-slate-500 mt-1">{subtitle}</p>}
-                </div>
-                {action && <div>{action}</div>}
-            </div>
-        )}
-        {children}
-    </div>
-);
-
-const StatCard = ({ label, value, type, icon: Icon }) => {
-    const colors = {
-        income: { bg: 'bg-emerald-50', text: 'text-emerald-700', iconBg: 'bg-emerald-100' },
-        expense: { bg: 'bg-rose-50', text: 'text-rose-700', iconBg: 'bg-rose-100' },
-        balance: { bg: 'bg-indigo-50', text: 'text-indigo-700', iconBg: 'bg-indigo-100' },
-        neutral: { bg: 'bg-slate-50', text: 'text-slate-700', iconBg: 'bg-slate-100' }
-    };
-    const theme = colors[type] || colors.neutral;
-
-    return (
-        <div className={`rounded-2xl p-5 border border-slate-100 bg-white hover:shadow-lg transition-all duration-300 group`}>
-            <div className="flex items-center justify-between mb-4">
-                <div className={`p-3 rounded-xl ${theme.iconBg} ${theme.text} group-hover:scale-110 transition-transform`}>
-                    {Icon ? <Icon size={22} /> : <TrendingUp size={22} />}
-                </div>
-                {type === 'income' && <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1">+ Pemasukan</span>}
-                {type === 'expense' && <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-full flex items-center gap-1">- Pengeluaran</span>}
-            </div>
-            <div>
-                <p className="text-sm font-medium text-slate-500 mb-1">{label}</p>
-                <h4 className={`text-2xl font-bold text-slate-800 tracking-tight`}>{value}</h4>
-            </div>
-        </div>
-    );
-};
-
-const Modal = ({ isOpen, onClose, title, children }) => {
-    if (!isOpen) return null;
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
-            <div className="relative bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fade-in shadow-2xl border border-slate-100">
-                <div className="flex justify-between items-center p-6 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur z-10">
-                    <h3 className="text-xl font-bold text-slate-800">{title}</h3>
-                    <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition text-slate-400 hover:text-slate-600"><X size={20} /></button>
-                </div>
-                <div className="p-6">
-                    {children}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// --- TRANSACTION FORM COMPONENT ---
-const TransactionForm = ({ type, onClose, initialData, subtype, user, products, dashboardStats, onSave }) => {
-    const [form, setForm] = useState(initialData || { 
-        date: new Date().toISOString().split('T')[0], 
-        amount: '', 
-        description: '', 
-        category: subtype === 'modal' ? 'modal' : (type === 'income' ? 'shopee' : (type === 'expense' ? 'produksi' : '')), 
-        paymentMethod: 'cash', 
-        transferType: 'bank_to_cash', 
-        notes: '' 
-    });
-    const [useStock, setUseStock] = useState(false);
-    const [selProd, setSelProd] = useState('');
-    const [qty, setQty] = useState(1);
-
-    const handleProd = (pid) => {
-        setSelProd(pid); 
-        const p = products.find(x => x.id === pid);
-        if (p) setForm(prev => ({...prev, description: `Penjualan: ${p.name} (${qty} pcs)`, amount: p.price * qty}));
-    };
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hudan Sportwear Finance</title>
     
-    const handleQty = (q) => {
-        const nq = parseInt(q) || 1; 
-        setQty(nq); 
-        const p = products.find(x => x.id === selProd);
-        if (p) setForm(prev => ({...prev, description: `Penjualan: ${p.name} (${nq} pcs)`, amount: p.price * nq}));
-    };
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Babel untuk JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    const submit = async (e) => {
-        e.preventDefault();
-        let data = {...form, amount: parseFloat(form.amount), type};
+    <!-- Library Eksternal (Excel & PDF) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Import Map untuk Modul React & Firebase -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+            "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js",
+            "lucide-react": "https://esm.sh/lucide-react@0.344.0"
+        }
+    }
+    </script>
+
+    <style>
+        /* Custom Styles & Animations */
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; color: #0f172a; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fade-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         
-        if (subtype === 'modal') {
-            data.category = 'modal';
+        /* Glass Effect */
+        .glass { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, increment } from 'firebase/firestore';
+        import { 
+            LayoutDashboard, Banknote, FileText, TrendingUp, Target, Building2, Save, 
+            Plus, Trash2, Edit2, Download, Upload, Printer, X, FileSpreadsheet, File as FileIcon,
+            ChevronLeft, ChevronRight, Calendar, Filter, Package, ShoppingCart, Menu, LogOut, ArrowUpRight, ArrowDownRight, Wallet, Database
+        } from 'lucide-react';
+
+        /* --- KONFIGURASI FIREBASE --- */
+        const manualConfig = {
+            apiKey: "AIzaSyCfEuuRtxv2A8uhIIs7Z4YQr6Me3ifaamc",
+            authDomain: "hudan-finance-196fc.firebaseapp.com",
+            projectId: "hudan-finance-196fc",
+            storageBucket: "hudan-finance-196fc.firebasestorage.app",
+            messagingSenderId: "675437915381",
+            appId: "1:675437915381:web:905a074fa153e37ce969bc"
+        };
+
+        const firebaseConfig = typeof window.__firebase_config !== 'undefined' 
+            ? JSON.parse(window.__firebase_config) 
+            : manualConfig;
+
+        if (firebaseConfig.apiKey === "ISI_API_KEY_DISINI") {
+            console.warn("⚠️ Baginda belum mengisi konfigurasi Firebase. Aplikasi mungkin tidak berjalan semestinya jika di-deploy mandiri.");
         }
 
-        // Logic Gudang (Stok)
-        if (type === 'income' && useStock && selProd) {
-            const p = products.find(x => x.id === selProd);
-            if (p.stock < qty) return alert("Stok kurang!");
-            
-            // Note: Stok updated in main component or via passed function, but here we construct data
-            data = {...data, productId: selProd, quantity: qty, isStockSale: true};
-            // Trigger stock update via onSave extra param if needed, or handle in parent.
-            // For simplicity, we assume parent handles it or we do it here if db passed.
-            // In this refactor, onSave handles the transaction save. Stock update logic is ideally in parent
-            // but let's pass the product update requirement.
-        }
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'hudan-sportwear-app';
 
-        // Logic Auto-Withdrawal
-        let autoWithdrawal = null;
-        if (type === 'expense' && form.paymentMethod === 'cash' && !initialData) {
-            const expenseAmount = parseFloat(form.amount);
-            if (expenseAmount > dashboardStats.cashBalance) {
-                const isConfirmed = confirm(
-                    `Ampun Baginda, Saldo Kas Tunai saat ini (Rp ${new Intl.NumberFormat('id-ID').format(dashboardStats.cashBalance)}) tidak mencukupi.\n\nApakah Baginda ingin mencatat "Tarik Tunai dari Bank" secara otomatis?`
-                );
+        /* --- HELPER FUNCTIONS --- */
+        const formatCurrency = (amount) => {
+            const num = parseFloat(amount) || 0;
+            return new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            }).format(Math.abs(num));
+        };
 
-                if (isConfirmed) {
-                    autoWithdrawal = {
-                        date: form.date,
-                        description: `Auto-Withdrawal: ${form.description}`,
-                        amount: expenseAmount,
-                        type: 'transfer',
-                        transferType: 'bank_to_cash',
-                        category: 'system',
-                        paymentMethod: 'system',
-                        notes: 'Otomatis: Talangan dari Bank',
-                        createdAt: new Date().toISOString()
-                    };
-                } else {
-                    return; // Cancel
-                }
+        const formatDate = (dateString) => {
+            if (!dateString) return '-';
+            if (!isNaN(dateString) && !dateString.toString().includes('-')) {
+                 return new Date(Math.round((dateString - 25569)*86400*1000)).toLocaleDateString('id-ID');
             }
-        }
+            return new Date(dateString).toLocaleDateString('id-ID', { 
+                day: '2-digit', 
+                month: 'short', 
+                year: 'numeric' 
+            });
+        };
 
-        onSave(data, initialData?.id, autoWithdrawal, (useStock ? {id: selProd, qty: -qty} : null));
-    };
+        /* --- UI COMPONENTS --- */
+        const SidebarItem = ({ icon: Icon, label, active, onClick }) => (
+            <button 
+                onClick={onClick}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group font-medium text-sm
+                ${active 
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' 
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-indigo-600'}`}
+            >
+                <Icon size={20} className={active ? 'text-white' : 'text-slate-400 group-hover:text-indigo-600'} />
+                <span>{label}</span>
+                {active && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white"></div>}
+            </button>
+        );
 
-    return (
-        <form onSubmit={submit} className="space-y-5">
-            {type === 'expense' && form.paymentMethod === 'cash' && (
-                <div className="flex justify-between items-center bg-amber-50 border border-amber-200 px-4 py-2 rounded-lg text-xs text-amber-800">
-                    <span>Saldo Kas Tunai:</span>
-                    <span className="font-bold">{formatCurrency(dashboardStats.cashBalance)}</span>
-                </div>
-            )}
-            {type === 'transfer' && form.transferType === 'bank_to_cash' && (
-                <div className="bg-blue-50 border border-blue-200 px-4 py-3 rounded-lg text-xs text-blue-800 flex items-start gap-2">
-                    <span className="text-lg">💡</span><div><strong>Info:</strong> Transaksi ini memindahkan uang Bank ke Kas.</div>
-                </div>
-            )}
+        const MobileNavItem = ({ icon: Icon, label, active, onClick }) => (
+            <button 
+                onClick={onClick}
+                className={`flex flex-col items-center justify-center p-2 rounded-lg transition-colors
+                ${active ? 'text-indigo-600' : 'text-slate-400'}`}
+            >
+                <Icon size={20} className={active ? 'mb-1' : 'mb-1'} strokeWidth={active ? 2.5 : 2} />
+                <span className="text-[10px] font-medium">{label}</span>
+            </button>
+        );
 
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Tanggal</label>
-                    <input type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
-                </div>
-                {type !== 'transfer' && (
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Metode</label>
-                        <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" value={form.paymentMethod} onChange={e => setForm({...form, paymentMethod: e.target.value})}>
-                            <option value="cash">Tunai (Kas)</option>
-                            <option value="noncash">Transfer (Bank)</option>
-                        </select>
+        const Card = ({ children, className = "", title, subtitle, action }) => (
+            <div className={`bg-white rounded-2xl p-6 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07),0_10px_20px_-2px_rgba(0,0,0,0.04)] border border-slate-100 ${className}`}>
+                {(title || action) && (
+                    <div className="flex justify-between items-start mb-6">
+                        <div>
+                            {title && <h3 className="text-lg font-bold text-slate-800 tracking-tight">{title}</h3>}
+                            {subtitle && <p className="text-sm text-slate-500 mt-1">{subtitle}</p>}
+                        </div>
+                        {action && <div>{action}</div>}
                     </div>
                 )}
+                {children}
             </div>
+        );
 
-            {type === 'income' && subtype !== 'modal' && (
-                <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-xl">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" checked={useStock} onChange={e => setUseStock(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300" />
-                        <span className="font-semibold text-indigo-900">Ambil dari Stok Gudang</span>
-                    </label>
-                    {useStock && (
-                        <div className="mt-4 grid grid-cols-3 gap-3 animate-fade-in">
-                            <div className="col-span-2">
-                                <select className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-sm" value={selProd} onChange={e => handleProd(e.target.value)} required>
-                                    <option value="">Pilih Produk...</option>
-                                    {products.map(p => <option key={p.id} value={p.id} disabled={p.stock <= 0}>{p.name} (Sisa: {p.stock})</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <input type="number" min="1" className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-sm" value={qty} onChange={e => handleQty(e.target.value)} required />
-                            </div>
+        const StatCard = ({ label, value, type, icon: Icon }) => {
+            const colors = {
+                income: { bg: 'bg-emerald-50', text: 'text-emerald-700', iconBg: 'bg-emerald-100' },
+                expense: { bg: 'bg-rose-50', text: 'text-rose-700', iconBg: 'bg-rose-100' },
+                balance: { bg: 'bg-indigo-50', text: 'text-indigo-700', iconBg: 'bg-indigo-100' },
+                neutral: { bg: 'bg-slate-50', text: 'text-slate-700', iconBg: 'bg-slate-100' }
+            };
+            const theme = colors[type] || colors.neutral;
+
+            return (
+                <div className={`rounded-2xl p-5 border border-slate-100 bg-white hover:shadow-lg transition-all duration-300 group`}>
+                    <div className="flex items-center justify-between mb-4">
+                        <div className={`p-3 rounded-xl ${theme.iconBg} ${theme.text} group-hover:scale-110 transition-transform`}>
+                            {Icon ? <Icon size={22} /> : <TrendingUp size={22} />}
                         </div>
-                    )}
-                </div>
-            )}
-
-            {!useStock && (
-                <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Deskripsi</label>
-                    <input type="text" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" placeholder={type === 'income' ? "Contoh: Penjualan Jersey" : "Contoh: Beli Token Listrik"} value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
-                </div>
-            )}
-
-            <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Jumlah (Rp)</label>
-                <div className="relative">
-                    <span className="absolute left-4 top-2.5 text-slate-400 font-semibold">Rp</span>
-                    <input type="number" required min="0" className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-lg ${useStock ? 'bg-slate-100 text-slate-500' : 'text-slate-800'}`} value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} readOnly={useStock} />
-                </div>
-            </div>
-
-            {type === 'income' && (
-                <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Kategori</label>
-                    {subtype === 'modal' ? (
-                        <input type="text" value="Modal Usaha" disabled className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-500 font-medium" />
-                    ) : (
-                        <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={form.category} onChange={e => setForm({...form, category: e.target.value})}>
-                            <option value="shopee">Shopee</option>
-                            <option value="offline">Offline</option>
-                            <option value="other">Lainnya</option>
-                        </select>
-                    )}
-                </div>
-            )}
-            
-            {type === 'expense' && (
-                <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Kategori</label>
-                    <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={form.category} onChange={e => setForm({...form, category: e.target.value})}>
-                        <option value="produksi">Produksi</option>
-                        <option value="operasional">Operasional</option>
-                        <option value="aset">Aset</option>
-                    </select>
-                </div>
-            )}
-            
-            {type === 'transfer' && (
-                <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Arah Transfer</label>
-                    <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={form.transferType} onChange={e => setForm({...form, transferType: e.target.value, description: e.target.value === 'bank_to_cash' ? 'Tarik Tunai' : 'Setor Tunai'})}>
-                        <option value="bank_to_cash">Bank ke Tunai (Tarik)</option>
-                        <option value="cash_to_bank">Tunai ke Bank (Setor)</option>
-                    </select>
-                </div>
-            )}
-
-            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-indigo-200 transition active:scale-95">Simpan Data</button>
-        </form>
-    );
-};
-
-/* --- MAIN COMPONENT --- */
-export default function HudanSportwearApp() {
-  const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [isLoading, setIsLoading] = useState(true);
-  const [libsLoaded, setLibsLoaded] = useState(false);
-  
-  // Data State
-  const [transactions, setTransactions] = useState([]);
-  const [assets, setAssets] = useState([]);
-  const [receivables, setReceivables] = useState([]);
-  const [targets, setTargets] = useState([]);
-  const [products, setProducts] = useState([]);
-
-  // UI State
-  const [activeModal, setActiveModal] = useState(null);
-  const [editData, setEditData] = useState(null);
-  
-  // Pagination & Filter State
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
-  const [reportFilter, setReportFilter] = useState({ startDate: '', endDate: '', category: 'all' });
-  
-  // Import & Submenu State
-  const [importTypeState, setImportTypeState] = useState('transactions');
-  const [importContext, setImportContext] = useState('all'); 
-  const [transTab, setTransTab] = useState('all');
-
-  // Load External Libraries
-  useEffect(() => {
-    Promise.all([
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'),
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
-    ]).then(() => setLibsLoaded(true)).catch(err => console.error("Failed to load libs", err));
-  }, []);
-
-  // Auth Initialization
-  useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Data Fetching
-  useEffect(() => {
-    if (!user) return;
-    const subs = [
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'), s => setTransactions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.date)-new Date(a.date)))),
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'assets'), s => setAssets(s.docs.map(d => ({id:d.id, ...d.data()})))),
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'receivables'), s => setReceivables(s.docs.map(d => ({id:d.id, ...d.data()})))),
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'targets'), s => setTargets(s.docs.map(d => ({id:d.id, ...d.data()})))),
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'products'), s => setProducts(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => a.name.localeCompare(b.name))))
-    ];
-    return () => subs.forEach(unsub => unsub());
-  }, [user]);
-
-  /* --- CRUD OPERATIONS --- */
-  const addRecord = async (collectionName, data) => {
-    if (!user) return;
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, collectionName), {
-      ...data,
-      createdAt: new Date().toISOString()
-    });
-    setActiveModal(null);
-  };
-
-  const updateRecord = async (collectionName, id, data) => {
-    if (!user) return;
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, collectionName, id), data);
-    setEditData(null);
-    setActiveModal(null);
-  };
-
-  const deleteRecord = async (collectionName, id) => {
-    if (!confirm('Apakah Baginda yakin ingin menghapus data ini?')) return;
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, collectionName, id));
-  };
-
-  const handleTransactionSave = async (data, id, autoWithdrawalData, stockUpdate) => {
-      // 1. Auto Withdrawal
-      if (autoWithdrawalData) {
-          await addRecord('transactions', autoWithdrawalData);
-      }
-      // 2. Stock Update
-      if (stockUpdate) {
-          await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'products', stockUpdate.id), {stock: increment(stockUpdate.qty)});
-      }
-      // 3. Save Main Transaction
-      if (id) await updateRecord('transactions', id, data);
-      else await addRecord('transactions', data);
-  };
-
-  const handlePayReceivable = async (receivable) => {
-      if (!confirm(`Tandai piutang ${receivable.customerName} sebagai LUNAS dan masukkan ke KAS?`)) return;
-      try {
-          await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'receivables', receivable.id), { status: 'paid' });
-          await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'), {
-              date: new Date().toISOString().split('T')[0],
-              description: `Pelunasan Piutang: ${receivable.customerName}`,
-              amount: parseFloat(receivable.amount),
-              type: 'income',
-              category: 'other',
-              paymentMethod: 'cash',
-              notes: 'Otomatis dari menu Piutang',
-              createdAt: new Date().toISOString()
-          });
-          alert("Berhasil! Saldo kas bertambah dan piutang dianggap lunas.");
-      } catch (e) { alert("Gagal memproses pelunasan."); }
-  };
-
-  const dashboardStats = useMemo(() => {
-    let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0;
-    transactions.forEach(t => {
-      const amt = parseFloat(t.amount) || 0;
-      if (t.type === 'income') {
-        income += amt;
-        if (t.paymentMethod === 'cash') cashBalance += amt;
-        else nonCashBalance += amt;
-      } else if (t.type === 'expense') {
-        expense += amt;
-        if (t.paymentMethod === 'cash') cashBalance -= amt;
-        else nonCashBalance -= amt;
-      } else if (t.type === 'transfer') {
-        if (t.transferType === 'bank_to_cash') {
-          cashBalance += amt;
-          nonCashBalance -= amt;
-        } else if (t.transferType === 'cash_to_bank') {
-          cashBalance -= amt;
-          nonCashBalance += amt;
-        }
-      }
-    });
-
-    const totalAssets = assets.reduce((sum, a) => sum + (parseFloat(a.value) || 0), 0);
-    const totalReceivables = receivables.filter(r => r.status === 'pending').reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-
-    return {
-      income,
-      expense,
-      balance: cashBalance + nonCashBalance,
-      cashBalance,
-      nonCashBalance,
-      totalAssets,
-      totalReceivables
-    };
-  }, [transactions, assets, receivables]);
-
-  // --- IMPORT LOGIC ---
-  const downloadTemplate = () => {
-    if (!libsLoaded) return alert("Pustaka Excel belum siap.");
-    let data = [];
-    let fileName = "Template_Import";
-
-    if (importTypeState === 'transactions') {
-        if (importContext === 'modal') {
-            data = [{ "No": 1, "Tanggal": "2024-01-01", "Jumlah": 10000000, "Sumber": "Investor A", "Keterangan": "Modal Awal", "Jenis": "income", "Kategori": "modal" }];
-            fileName = "Template_Modal_Masuk";
-        } else if (importContext === 'sales') {
-            data = [{ "No": 1, "Tanggal": "2024-01-01", "Jumlah": 150000, "Sumber": "Jersey Timnas", "Keterangan": "Lunas", "Jenis": "income", "Kategori": "shopee" }];
-            fileName = "Template_Penjualan";
-        } else if (importContext === 'expense_noncash') {
-            data = [{ "No": 1, "Tanggal": "2024-01-01", "Item": "Beli Kain Jersey", "Jumlah": 1500000, "Kategori": "produksi", "Keterangan": "Transfer ke Supplier A (Biaya)" }, { "No": 2, "Tanggal": "2024-01-02", "Item": "Tarik Tunai", "Jumlah": 500000, "Kategori": "transfer", "Keterangan": "Isi Kas" }];
-            fileName = "Template_Pengeluaran_NonTunai";
-        } else if (importContext === 'expense_cash') {
-            data = [{ "No": 1, "Tanggal": "2024-01-01", "Item": "Beli Bensin", "Jumlah": 35000, "Kategori": "operasional", "Keterangan": "Bensin Motor" }];
-            fileName = "Template_Pengeluaran_Tunai";
-        } else if (importContext === 'expense') {
-            data = [{ "No": 1, "Tanggal": "2024-01-01", "Item": "Beli Kain", "Jumlah": 500000, "Kategori": "produksi", "Keterangan": "Bahan baku", "Metode": "noncash" }];
-            fileName = "Template_Pengeluaran_Umum";
-        } else {
-            data = [{ "No": 1, "Tanggal": "2024-01-01", "Jumlah": 50000, "Sumber": "Beli Pulsa", "Keterangan": "Ops", "Jenis": "expense", "Kategori": "operasional" }];
-            fileName = "Template_Transaksi_Umum";
-        }
-    } else {
-        data = [{ "Nama": "Jersey Polos M", "Harga": 75000, "Stok": 50 }];
-        fileName = "Template_Produk_Gudang";
-    }
-
-    const wb = window.XLSX.utils.book_new();
-    const ws = window.XLSX.utils.json_to_sheet(data);
-    window.XLSX.utils.book_append_sheet(wb, ws, "Template");
-    window.XLSX.writeFile(wb, `${fileName}.xlsx`);
-  };
-
-  const handleFileImport = async (e) => {
-      const type = importTypeState;
-      const file = e.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-          try {
-              const data = new Uint8Array(evt.target.result);
-              const workbook = window.XLSX.read(data, { type: 'array' });
-              const sheetName = workbook.SheetNames[0];
-              const jsonData = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-              if (jsonData.length === 0) return alert("Berkas kosong.");
-              if (!confirm(`Import ${jsonData.length} data?`)) { e.target.value = null; return; }
-
-              setIsLoading(true);
-              let count = 0;
-              
-              for (const row of jsonData) {
-                  let docData = null;
-                  const getVal = (key) => row[Object.keys(row).find(k => k.toLowerCase() === key.toLowerCase())];
-
-                  if (type === 'transactions') {
-                      const tDate = getVal('tanggal') || getVal('date');
-                      let finalDate = new Date().toISOString().split('T')[0];
-                      if (typeof tDate === 'number') {
-                          finalDate = new Date(Math.round((tDate - 25569)*86400*1000)).toISOString().split('T')[0];
-                      } else if (tDate) {
-                          finalDate = tDate; 
-                      }
-
-                      const rawCategory = (getVal('kategori') || getVal('category') || 'lainnya').toLowerCase();
-                      const rawItem = (getVal('item') || getVal('sumber') || getVal('deskripsi') || getVal('description') || '').toLowerCase();
-                      
-                      let defaultType = 'expense';
-                      let defaultPayment = 'cash';
-                      let transferType = null;
-
-                      // Smart Logic
-                      if (rawItem.includes('tarik tunai') || rawItem.includes('tarik uang') || rawItem.includes('ambil uang')) {
-                          defaultType = 'transfer';
-                          transferType = 'bank_to_cash';
-                          defaultPayment = 'cash';
-                      } else if (rawItem.includes('setor tunai') || rawItem.includes('deposit')) {
-                          defaultType = 'transfer';
-                          transferType = 'cash_to_bank';
-                          defaultPayment = 'cash';
-                      } else if (importContext === 'expense_noncash') {
-                          defaultType = 'expense';
-                          defaultPayment = 'noncash';
-                      } else if (importContext === 'expense_cash') {
-                          defaultType = 'expense';
-                          defaultPayment = 'cash';
-                      } else if (importContext === 'modal') {
-                          defaultType = 'income';
-                          defaultPayment = 'noncash';
-                      } else {
-                          defaultType = (getVal('jenis') || getVal('type') || 'expense').toLowerCase();
-                          defaultPayment = (getVal('metode') || getVal('method') || 'cash').toLowerCase();
-                      }
-
-                      docData = {
-                          date: finalDate,
-                          description: getVal('item') || getVal('sumber') || getVal('deskripsi') || getVal('description') || 'Imported Transaction',
-                          notes: getVal('keterangan') || getVal('notes') || '',
-                          amount: parseFloat(getVal('jumlah') || getVal('amount') || 0),
-                          type: defaultType,
-                          category: rawCategory,
-                          paymentMethod: defaultPayment,
-                          createdAt: new Date().toISOString()
-                      };
-
-                      if (transferType) {
-                          docData.transferType = transferType;
-                          docData.category = 'transfer';
-                      }
-                  } else {
-                      docData = {
-                          name: getVal('nama') || getVal('name') || 'Produk Import',
-                          price: parseFloat(getVal('harga') || getVal('price') || 0),
-                          stock: parseInt(getVal('stok') || getVal('stock') || 0),
-                          createdAt: new Date().toISOString()
-                      };
-                  }
-
-                  if (docData && (docData.amount || docData.price)) {
-                      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, type), docData);
-                      count++;
-                  }
-              }
-
-              setIsLoading(false);
-              alert(`Sukses import ${count} data.`);
-              setActiveModal(null);
-              e.target.value = null;
-          } catch (err) {
-              console.error(err);
-              setIsLoading(false);
-              alert("Gagal proses file. Pastikan format kolom benar.");
-          }
-      };
-      reader.readAsArrayBuffer(file);
-  };
-
-  const exportToExcel = (data, name) => {
-    if (!libsLoaded) return;
-    const wb = window.XLSX.utils.book_new();
-    const ws = window.XLSX.utils.json_to_sheet(data);
-    window.XLSX.utils.book_append_sheet(wb, ws, "Data");
-    window.XLSX.writeFile(wb, `${name}.xlsx`);
-  };
-
-  const exportToPDF = (headers, data, title) => {
-    if (!libsLoaded) return;
-    const doc = new window.jspdf.jsPDF();
-    doc.text(title, 14, 20);
-    doc.autoTable({ head: [headers], body: data, startY: 30, theme: 'grid' });
-    doc.save(`${title}.pdf`);
-  };
-
-  /* --- RENDER FUNCTIONS --- */
-  
-  // Dashboard
-  const renderDashboard = () => (
-    <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
-        <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
-            <div className="relative z-10">
-                <h2 className="text-3xl font-bold mb-2">Selamat Datang, Baginda Raja</h2>
-                <p className="text-indigo-100 opacity-90">Keuangan kerajaan Hudan Sportwear dalam kondisi {dashboardStats.balance >= 0 ? 'prima' : 'perlu perhatian'}.</p>
-            </div>
-            <div className="absolute right-0 top-0 h-full w-1/3 bg-white/5 skew-x-12 transform translate-x-12"></div>
-            <div className="absolute right-20 bottom-0 h-32 w-32 bg-indigo-500/20 rounded-full blur-2xl"></div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <StatCard label="Total Pemasukan" value={formatCurrency(dashboardStats.income)} type="income" icon={ArrowDownRight} />
-            <StatCard label="Total Pengeluaran" value={formatCurrency(dashboardStats.expense)} type="expense" icon={ArrowUpRight} />
-            <StatCard label="Saldo Total" value={formatCurrency(dashboardStats.balance)} type="balance" icon={Wallet} />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card title="Rincian Saldo" subtitle="Posisi keuangan saat ini">
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-600"><Banknote size={20}/></div>
-                            <span className="font-medium text-slate-600">Saldo Tunai (Kas)</span>
-                        </div>
-                        <span className="font-bold text-slate-800">{formatCurrency(dashboardStats.cashBalance)}</span>
+                        {type === 'income' && <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-1">+ Pemasukan</span>}
+                        {type === 'expense' && <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-full flex items-center gap-1">- Pengeluaran</span>}
                     </div>
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-purple-600"><Building2 size={20}/></div>
-                            <span className="font-medium text-slate-600">Saldo Bank / Non-Tunai</span>
-                        </div>
-                        <span className="font-bold text-slate-800">{formatCurrency(dashboardStats.nonCashBalance)}</span>
-                    </div>
-                </div>
-            </Card>
-            <Card title="Aset & Piutang" subtitle="Kekayaan non-likuid kerajaan">
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-emerald-50/50 border border-emerald-100 rounded-xl">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-emerald-600"><Package size={20}/></div>
-                            <span className="font-medium text-slate-600">Total Aset</span>
-                        </div>
-                        <span className="font-bold text-emerald-700">{formatCurrency(dashboardStats.totalAssets)}</span>
-                    </div>
-                    <div className="flex items-center justify-between p-4 bg-amber-50/50 border border-amber-100 rounded-xl">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-amber-600"><FileText size={20}/></div>
-                            <span className="font-medium text-slate-600">Piutang Belum Lunas</span>
-                        </div>
-                        <span className="font-bold text-amber-700">{formatCurrency(dashboardStats.totalReceivables)}</span>
-                    </div>
-                </div>
-            </Card>
-        </div>
-    </div>
-  );
-
-  // Transactions
-  const renderTransactions = () => {
-      let filteredData = transactions;
-      if (transTab === 'modal') filteredData = transactions.filter(t => t.type === 'income' && t.category === 'modal');
-      else if (transTab === 'sales') filteredData = transactions.filter(t => t.type === 'income' && t.category !== 'modal');
-      else if (transTab === 'expense') filteredData = transactions.filter(t => t.type === 'expense');
-      else if (transTab === 'transfer') filteredData = transactions.filter(t => t.type === 'transfer');
-
-      const idxLast = currentPage * itemsPerPage;
-      const idxFirst = idxLast - itemsPerPage;
-      const currentData = filteredData.slice(idxFirst, idxLast);
-      const totalPages = Math.ceil(filteredData.length / itemsPerPage);
-
-      return (
-          <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
-              <div>
-                  <h2 className="text-2xl font-bold text-slate-800">Riwayat Transaksi</h2>
-                  <p className="text-slate-500">Kelola arus kas per kategori aktivitas.</p>
-              </div>
-
-              <div className="flex flex-wrap border-b border-slate-200">
-                  {['all','modal','sales','expense','transfer'].map(tab => (
-                      <button 
-                          key={tab} 
-                          onClick={() => { setTransTab(tab); setCurrentPage(1); }} 
-                          className={`px-6 py-3 text-sm font-bold border-b-2 capitalize transition-colors
-                          ${transTab === tab ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'border-transparent text-slate-500 hover:text-indigo-600'}`}
-                      >
-                          {tab === 'all' ? 'Semua' : tab === 'sales' ? 'Penjualan' : tab === 'expense' ? 'Pengeluaran' : tab === 'modal' ? 'Modal' : 'Tarik Tunai'}
-                      </button>
-                  ))}
-              </div>
-
-              <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100 gap-4">
-                  <div className="text-sm text-slate-500 font-medium">
-                      Menampilkan {filteredData.length} data
-                  </div>
-                  <div className="flex flex-wrap gap-2 justify-end">
-                      {transTab === 'all' && (
-                          <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('all'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-all text-sm font-bold shadow-sm">
-                              <Upload size={16}/> Import Excel
-                          </button>
-                      )}
-                      
-                      {transTab === 'modal' && (
-                          <>
-                              <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('modal'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-all text-sm font-bold shadow-sm">
-                                  <Upload size={16}/> Import
-                              </button>
-                              <button onClick={() => {setEditData(null); setActiveModal('modal')}} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-xl hover:bg-teal-700 shadow-md shadow-teal-200 transition-all text-sm font-bold">
-                                  <Plus size={18}/> Input Modal
-                              </button>
-                          </>
-                      )}
-                      
-                      {transTab === 'sales' && (
-                          <>
-                              <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('sales'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-all text-sm font-bold shadow-sm">
-                                  <Upload size={16}/> Import
-                              </button>
-                              <button onClick={() => {setEditData(null); setActiveModal('sales')}} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 shadow-md shadow-emerald-200 transition-all text-sm font-bold">
-                                  <ShoppingCart size={18}/> Input Penjualan
-                              </button>
-                          </>
-                      )}
-                      
-                      {transTab === 'expense' && (
-                          <>
-                              <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('expense_cash'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl hover:bg-amber-100 transition-all text-sm font-bold shadow-sm">
-                                  <Upload size={16}/> Import Tunai
-                              </button>
-                              <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('expense_noncash'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-200 text-purple-700 rounded-xl hover:bg-purple-100 transition-all text-sm font-bold shadow-sm">
-                                  <Upload size={16}/> Import Non-Tunai
-                              </button>
-                              <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('expense'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-all text-sm font-bold shadow-sm">
-                                  <Upload size={16}/> Import Umum
-                              </button>
-                              <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 shadow-md shadow-rose-200 transition-all text-sm font-bold">
-                                  <Plus size={18}/> Catat Pengeluaran
-                              </button>
-                          </>
-                      )}
-                      
-                      {transTab === 'transfer' && (
-                          <>
-                              <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('transfer'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-all text-sm font-bold shadow-sm">
-                                  <Upload size={16}/> Import
-                              </button>
-                              <button onClick={() => {setEditData(null); setActiveModal('transfer')}} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-md shadow-blue-200 transition-all text-sm font-bold">
-                                  <ArrowUpRight size={18}/> Transfer / Tarik Tunai
-                              </button>
-                          </>
-                      )}
-                  </div>
-              </div>
-
-              <Card className="overflow-hidden p-0">
-                  <div className="overflow-x-auto">
-                      <table className="w-full text-sm text-left">
-                          <thead className="bg-slate-50 text-xs uppercase text-slate-500 font-semibold border-b border-slate-100">
-                              <tr>
-                                  <th className="px-6 py-4">Tanggal & Ket</th>
-                                  <th className="px-6 py-4">Kategori</th>
-                                  <th className="px-6 py-4">Jumlah</th>
-                                  <th className="px-6 py-4 text-right">Aksi</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50">
-                              {currentData.length > 0 ? currentData.map((t) => (
-                                  <tr key={t.id} className="hover:bg-slate-50/80 transition-colors">
-                                      <td className="px-6 py-4">
-                                          <div className="font-bold text-slate-800">{t.description}</div>
-                                          <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
-                                              {formatDate(t.date)}
-                                              {t.isStockSale && <span className="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] border border-indigo-100">Stok</span>}
-                                          </div>
-                                      </td>
-                                      <td className="px-6 py-4">
-                                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${
-                                              t.type === 'income' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
-                                              t.type === 'expense' ? 'bg-rose-50 text-rose-700 border-rose-100' : 
-                                              'bg-indigo-50 text-indigo-700 border-indigo-100'}`}>
-                                              {t.type === 'income' ? 'Masuk' : t.type === 'expense' ? 'Keluar' : 'Transfer'}
-                                          </span>
-                                          <div className="text-xs text-slate-400 mt-1 capitalize">{t.category || t.transferType?.replace(/_/g, ' ')}</div>
-                                      </td>
-                                      <td className={`px-6 py-4 font-bold ${t.type === 'income' ? 'text-emerald-600' : t.type === 'expense' ? 'text-rose-600' : 'text-slate-700'}`}>
-                                          {t.type === 'expense' ? '-' : '+'} {formatCurrency(t.amount)}
-                                          <div className="text-xs font-normal text-slate-400 mt-0.5 capitalize">{t.paymentMethod}</div>
-                                      </td>
-                                      <td className="px-6 py-4 text-right">
-                                          <div className="flex justify-end gap-2">
-                                              <button onClick={() => {setEditData(t); setActiveModal(t.type === 'income' ? (t.category === 'modal' ? 'modal' : 'sales') : t.type)}} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"><Edit2 size={16}/></button>
-                                              <button onClick={() => deleteRecord('transactions', t.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"><Trash2 size={16}/></button>
-                                          </div>
-                                      </td>
-                                  </tr>
-                              )) : (
-                                  <tr><td colSpan="4" className="px-6 py-12 text-center text-slate-400">Belum ada data untuk kategori ini, Baginda.</td></tr>
-                              )}
-                          </tbody>
-                      </table>
-                  </div>
-                  {totalPages > 1 && (
-                      <div className="flex justify-between items-center p-4 border-t border-slate-100 bg-slate-50/30">
-                          <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-50 border border-transparent hover:border-slate-200 transition"><ChevronLeft size={20} className="text-slate-500"/></button>
-                          <span className="text-sm font-medium text-slate-500">Hal {currentPage} dari {totalPages}</span>
-                          <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-50 border border-transparent hover:border-slate-200 transition"><ChevronRight size={20} className="text-slate-500"/></button>
-                      </div>
-                  )}
-              </Card>
-          </div>
-      );
-  };
-
-  const renderWarehouse = () => (
-      <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
-          <div className="flex justify-between items-center">
-              <div>
-                  <h2 className="text-2xl font-bold text-slate-800">Gudang Kerajaan</h2>
-                  <p className="text-slate-500">Inventaris stok barang dagangan.</p>
-              </div>
-              <div className="flex gap-2">
-                  <button onClick={() => {setEditData(null); setImportTypeState('products'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-all text-sm font-bold shadow-sm">
-                      <Upload size={18}/> Import
-                  </button>
-                  <button onClick={() => {setEditData(null); setActiveModal('product')}} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all text-sm font-bold">
-                      <Plus size={18}/> Produk
-                  </button>
-              </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {products.map(p => (
-                  <div key={p.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow group relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-50 rounded-bl-full -mr-12 -mt-12 transition-transform group-hover:scale-110"></div>
-                      <div className="flex justify-between items-start mb-4 relative z-10">
-                          <div className="bg-indigo-50 p-3 rounded-xl text-indigo-600"><Package size={24} /></div>
-                          <div className="flex gap-1">
-                              <button onClick={() => {setEditData(p); setActiveModal('product')}} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"><Edit2 size={16}/></button>
-                              <button onClick={() => deleteRecord('products', p.id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><Trash2 size={16}/></button>
-                          </div>
-                      </div>
-                      <h4 className="font-bold text-lg text-slate-800 mb-1">{p.name}</h4>
-                      <p className="text-sm text-slate-500 mb-4">{formatCurrency(p.price)} / pcs</p>
-                      <div className="bg-slate-50 rounded-xl p-3 flex justify-between items-center">
-                          <span className="text-xs font-medium text-slate-500 uppercase">Stok Tersedia</span>
-                          <span className={`text-lg font-bold ${p.stock <= 5 ? 'text-rose-600' : 'text-emerald-600'}`}>{p.stock} pcs</span>
-                      </div>
-                  </div>
-              ))}
-              {products.length === 0 && (
-                  <div className="col-span-full py-16 text-center border-2 border-dashed border-slate-200 rounded-3xl">
-                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300"><Package size={32}/></div>
-                      <p className="text-slate-400 font-medium">Gudang masih kosong melompong.</p>
-                  </div>
-              )}
-          </div>
-      </div>
-  );
-
-  if (isLoading) {
-    return (
-        <div className="flex h-screen items-center justify-center bg-slate-50">
-            <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-        </div>
-    );
-  }
-
-  return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden">
-        {/* SIDEBAR */}
-        <aside className="hidden md:flex flex-col w-72 bg-white border-r border-slate-200 h-full relative z-20">
-            <div className="p-8 pb-4">
-                <div className="flex items-center gap-3 text-indigo-700 mb-1">
-                    <div className="p-2 bg-indigo-600 rounded-lg text-white"><TrendingUp size={24}/></div>
-                    <h1 className="text-xl font-bold tracking-tight">Hudan <span className="font-light">Sport</span></h1>
-                </div>
-                <p className="text-xs text-slate-400 pl-1">Finance System v2.0</p>
-            </div>
-            
-            <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
-                <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-                <SidebarItem icon={Banknote} label="Transaksi" active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} />
-                <SidebarItem icon={Package} label="Gudang Stok" active={activeTab === 'warehouse'} onClick={() => setActiveTab('warehouse')} />
-                <SidebarItem icon={FileText} label="Laporan" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
-                <SidebarItem icon={Building2} label="Aset & Piutang" active={activeTab === 'assets'} onClick={() => setActiveTab('assets')} />
-                <SidebarItem icon={Target} label="Target Bisnis" active={activeTab === 'targets'} onClick={() => setActiveTab('targets')} />
-            </nav>
-
-            <div className="p-4 border-t border-slate-100">
-                <div className="bg-slate-50 rounded-xl p-4 flex items-center gap-3">
-                    <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold">R</div>
                     <div>
-                        <div className="text-sm font-bold text-slate-800">Baginda Raja</div>
-                        <div className="text-xs text-slate-500">Administrator</div>
+                        <p className="text-sm font-medium text-slate-500 mb-1">{label}</p>
+                        <h4 className={`text-2xl font-bold text-slate-800 tracking-tight`}>{value}</h4>
                     </div>
                 </div>
-            </div>
-        </aside>
+            );
+        };
 
-        {/* MAIN */}
-        <main className="flex-1 h-full overflow-y-auto relative scroll-smooth bg-slate-50">
-            {/* Mobile Header */}
-            <header className="md:hidden bg-white/80 backdrop-blur-md sticky top-0 z-30 border-b border-slate-200 px-4 py-3 flex justify-between items-center">
-                <div className="flex items-center gap-2 font-bold text-indigo-700">
-                    <div className="p-1.5 bg-indigo-600 rounded text-white"><TrendingUp size={18}/></div>
-                    <span>Hudan Sport</span>
-                </div>
-                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 text-xs font-bold">R</div>
-            </header>
-
-            <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-full">
-                {activeTab === 'dashboard' && renderDashboard()}
-                {activeTab === 'transactions' && renderTransactions()}
-                {activeTab === 'warehouse' && renderWarehouse()}
-                {activeTab === 'reports' && (
-                    <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-2xl font-bold text-slate-800">Laporan Keuangan</h2>
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
+                    <div className="relative bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fade-in shadow-2xl border border-slate-100">
+                        <div className="flex justify-between items-center p-6 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur z-10">
+                            <h3 className="text-xl font-bold text-slate-800">{title}</h3>
+                            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition text-slate-400 hover:text-slate-600"><X size={20} /></button>
                         </div>
-                        <Card>
-                            <div className="flex flex-col md:flex-row gap-4 items-end mb-6">
-                                <div className="flex-1 w-full"><label className="text-xs font-semibold text-slate-500 uppercase mb-1">Mulai Tanggal</label><input type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" value={reportFilter.startDate} onChange={e=>setReportFilter({...reportFilter, startDate:e.target.value})} /></div>
-                                <div className="flex-1 w-full"><label className="text-xs font-semibold text-slate-500 uppercase mb-1">Sampai Tanggal</label><input type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={reportFilter.endDate} onChange={e=>setReportFilter({...reportFilter, endDate:e.target.value})} /></div>
-                                <div className="flex gap-2">
-                                    <button onClick={()=>exportToExcel(transactions, "Laporan")} className="p-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition" title="Export Excel"><FileSpreadsheet size={20}/></button>
-                                    <button onClick={()=>exportToPDF(["Tanggal","Deskripsi","Jumlah"], transactions.map(t=>[formatDate(t.date), t.description, formatCurrency(t.amount)]), "Laporan")} className="p-3 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition" title="Export PDF"><FileIcon size={20}/></button>
+                        <div className="p-6">
+                            {children}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        /* --- MAIN APP --- */
+        function HudanSportwearApp() {
+            const [user, setUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [isLoading, setIsLoading] = useState(true);
+            
+            // Data & UI State
+            const [transactions, setTransactions] = useState([]);
+            const [assets, setAssets] = useState([]);
+            const [receivables, setReceivables] = useState([]);
+            const [targets, setTargets] = useState([]);
+            const [products, setProducts] = useState([]);
+            const [activeModal, setActiveModal] = useState(null);
+            const [editData, setEditData] = useState(null);
+            const [currentPage, setCurrentPage] = useState(1);
+            const itemsPerPage = 8;
+            const [reportFilter, setReportFilter] = useState({ startDate: '', endDate: '', category: 'all' });
+            const [importTypeState, setImportTypeState] = useState('transactions');
+
+            // Auth & Data Fetching
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
+                            await signInWithCustomToken(auth, window.__initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) { setIsLoading(false); }
+                };
+                initAuth();
+                onAuthStateChanged(auth, (u) => { setUser(u); setIsLoading(false); });
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const subs = [
+                    onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'), s => setTransactions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.date)-new Date(a.date)))),
+                    onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'assets'), s => setAssets(s.docs.map(d => ({id:d.id, ...d.data()})))),
+                    onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'receivables'), s => setReceivables(s.docs.map(d => ({id:d.id, ...d.data()})))),
+                    onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'targets'), s => setTargets(s.docs.map(d => ({id:d.id, ...d.data()})))),
+                    onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'products'), s => setProducts(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => a.name.localeCompare(b.name))))
+                ];
+                return () => subs.forEach(unsub => unsub());
+            }, [user]);
+
+            // CRUD Operations
+            const addRecord = async (col, data) => { 
+                if(!user) return; 
+                await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, col), { ...data, createdAt: new Date().toISOString() }); 
+                setActiveModal(null); 
+            };
+            const updateRecord = async (col, id, data) => { 
+                if(!user) return; 
+                await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, col, id), data); 
+                setEditData(null); setActiveModal(null); 
+            };
+            const deleteRecord = async (col, id) => { 
+                if(confirm('Baginda yakin ingin menghapus data ini?')) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, col, id)); 
+            };
+
+            // Logic Stats & Auto Payment
+            const dashboardStats = useMemo(() => {
+                let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0;
+                transactions.forEach(t => {
+                    const amt = parseFloat(t.amount) || 0;
+                    if(t.type === 'income') { income += amt; t.paymentMethod === 'cash' ? cashBalance += amt : nonCashBalance += amt; }
+                    else if(t.type === 'expense') { expense += amt; t.paymentMethod === 'cash' ? cashBalance -= amt : nonCashBalance -= amt; }
+                    else if(t.type === 'transfer') {
+                        if(t.transferType === 'bank_to_cash') { cashBalance += amt; nonCashBalance -= amt; }
+                        else { cashBalance -= amt; nonCashBalance += amt; }
+                    }
+                });
+                const totalAssets = assets.reduce((s, a) => s + (parseFloat(a.value)||0), 0);
+                const totalReceivables = receivables.filter(r => r.status === 'pending').reduce((s, r) => s + (parseFloat(r.amount)||0), 0);
+                return { income, expense, balance: cashBalance + nonCashBalance, cashBalance, nonCashBalance, totalAssets, totalReceivables };
+            }, [transactions, assets, receivables]);
+
+            const handlePayReceivable = async (receivable) => {
+                if (!confirm(`Tandai piutang ${receivable.customerName} sebagai LUNAS dan masukkan ke KAS?`)) return;
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'receivables', receivable.id), { status: 'paid' });
+                    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'), {
+                        date: new Date().toISOString().split('T')[0],
+                        description: `Pelunasan Piutang: ${receivable.customerName}`,
+                        amount: parseFloat(receivable.amount),
+                        type: 'income', category: 'other', paymentMethod: 'cash', notes: 'Otomatis dari menu Piutang', createdAt: new Date().toISOString()
+                    });
+                    alert("Berhasil! Saldo kas bertambah dan piutang dianggap lunas.");
+                } catch (e) { alert("Gagal memproses pelunasan."); }
+            };
+
+            // --- IMPORT LOGIC ---
+            const handleFileImport = async (e) => {
+                const type = importTypeState;
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (evt) => {
+                    try {
+                        const data = new Uint8Array(evt.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[sheetName];
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                        if (jsonData.length === 0) return alert("Berkas kosong, Baginda.");
+                        
+                        if (!confirm(`Apakah Baginda yakin ingin mengimport ${jsonData.length} baris data ke ${type === 'transactions' ? 'Transaksi' : 'Gudang'}?`)) {
+                            e.target.value = null;
+                            return;
+                        }
+
+                        setIsLoading(true);
+                        let count = 0;
+                        
+                        const batchPromises = jsonData.map(async (row) => {
+                            let docData = null;
+                            const getVal = (key) => row[Object.keys(row).find(k => k.toLowerCase() === key.toLowerCase())];
+
+                            if (type === 'transactions') {
+                                const tDate = getVal('tanggal') || getVal('date');
+                                let finalDate = new Date().toISOString().split('T')[0];
+                                if (typeof tDate === 'number') {
+                                    finalDate = new Date(Math.round((tDate - 25569)*86400*1000)).toISOString().split('T')[0];
+                                } else if (tDate) {
+                                    finalDate = tDate; 
+                                }
+
+                                docData = {
+                                    date: finalDate,
+                                    description: getVal('deskripsi') || getVal('description') || 'Imported Transaction',
+                                    amount: parseFloat(getVal('jumlah') || getVal('amount') || 0),
+                                    type: (getVal('jenis') || getVal('type') || 'expense').toLowerCase(),
+                                    category: (getVal('kategori') || getVal('category') || 'lainnya').toLowerCase(),
+                                    paymentMethod: (getVal('metode') || getVal('method') || 'cash').toLowerCase(),
+                                    createdAt: new Date().toISOString()
+                                };
+                            } else if (type === 'products') {
+                                docData = {
+                                    name: getVal('nama') || getVal('name') || 'Produk Import',
+                                    price: parseFloat(getVal('harga') || getVal('price') || 0),
+                                    stock: parseInt(getVal('stok') || getVal('stock') || 0),
+                                    createdAt: new Date().toISOString()
+                                };
+                            }
+
+                            if (docData && (docData.amount || docData.price)) {
+                                await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, type), docData);
+                                count++;
+                            }
+                        });
+
+                        await Promise.all(batchPromises);
+                        setIsLoading(false);
+                        alert(`Berhasil mengimport ${count} data, Baginda.`);
+                        setActiveModal(null);
+                        e.target.value = null;
+                    } catch (error) {
+                        console.error(error);
+                        setIsLoading(false);
+                        alert("Gagal memproses berkas Excel, Baginda. Pastikan format kolom benar.");
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            };
+
+            // Export Helpers
+            const exportToExcel = (data, name) => {
+                if (typeof XLSX === 'undefined') return alert("Pustaka Excel belum siap, Baginda.");
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), "Data");
+                XLSX.writeFile(wb, `${name}.xlsx`);
+            };
+            const exportToPDF = (headers, data, title) => {
+                if (typeof window.jspdf === 'undefined') return alert("Pustaka PDF belum siap, Baginda.");
+                const doc = new window.jspdf.jsPDF();
+                doc.text(title, 14, 20);
+                doc.autoTable({ head: [headers], body: data, startY: 30, theme: 'grid' });
+                doc.save(`${title}.pdf`);
+            };
+
+            /* --- VIEW RENDERS --- */
+            
+            const renderDashboard = () => (
+                <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
+                    <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
+                        <div className="relative z-10">
+                            <h2 className="text-3xl font-bold mb-2">Selamat Datang, Baginda Raja</h2>
+                            <p className="text-indigo-100 opacity-90">Keuangan kerajaan Hudan Sportwear dalam kondisi {dashboardStats.balance >= 0 ? 'prima' : 'perlu perhatian'}.</p>
+                        </div>
+                        <div className="absolute right-0 top-0 h-full w-1/3 bg-white/5 skew-x-12 transform translate-x-12"></div>
+                        <div className="absolute right-20 bottom-0 h-32 w-32 bg-indigo-500/20 rounded-full blur-2xl"></div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <StatCard label="Total Pemasukan" value={formatCurrency(dashboardStats.income)} type="income" icon={ArrowDownRight} />
+                        <StatCard label="Total Pengeluaran" value={formatCurrency(dashboardStats.expense)} type="expense" icon={ArrowUpRight} />
+                        <StatCard label="Saldo Total" value={formatCurrency(dashboardStats.balance)} type="balance" icon={Wallet} />
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <Card title="Rincian Saldo" subtitle="Posisi keuangan saat ini">
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-600"><Banknote size={20}/></div>
+                                        <span className="font-medium text-slate-600">Saldo Tunai (Kas)</span>
+                                    </div>
+                                    <span className="font-bold text-slate-800">{formatCurrency(dashboardStats.cashBalance)}</span>
+                                </div>
+                                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-white rounded-lg shadow-sm text-purple-600"><Building2 size={20}/></div>
+                                        <span className="font-medium text-slate-600">Saldo Bank / Non-Tunai</span>
+                                    </div>
+                                    <span className="font-bold text-slate-800">{formatCurrency(dashboardStats.nonCashBalance)}</span>
                                 </div>
                             </div>
-                            <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 text-slate-400">Silakan pilih rentang tanggal untuk mengunduh laporan detail.</div>
+                        </Card>
+                        <Card title="Aset & Piutang" subtitle="Kekayaan non-likuid kerajaan">
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between p-4 bg-emerald-50/50 border border-emerald-100 rounded-xl">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-white rounded-lg shadow-sm text-emerald-600"><Package size={20}/></div>
+                                        <span className="font-medium text-slate-600">Total Aset</span>
+                                    </div>
+                                    <span className="font-bold text-emerald-700">{formatCurrency(dashboardStats.totalAssets)}</span>
+                                </div>
+                                <div className="flex items-center justify-between p-4 bg-amber-50/50 border border-amber-100 rounded-xl">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-white rounded-lg shadow-sm text-amber-600"><FileText size={20}/></div>
+                                        <span className="font-medium text-slate-600">Piutang Belum Lunas</span>
+                                    </div>
+                                    <span className="font-bold text-amber-700">{formatCurrency(dashboardStats.totalReceivables)}</span>
+                                </div>
+                            </div>
                         </Card>
                     </div>
-                )}
-                {activeTab === 'assets' && (
+                </div>
+            );
+
+            const renderTransactions = () => {
+                const idxLast = currentPage * itemsPerPage;
+                const idxFirst = idxLast - itemsPerPage;
+                const currentData = transactions.slice(idxFirst, idxLast);
+                const totalPages = Math.ceil(transactions.length / itemsPerPage);
+
+                return (
                     <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-center"><h3 className="text-lg font-bold text-slate-800">Aset Kerajaan</h3><button onClick={()=>{setEditData(null);setActiveModal('asset')}} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">+ Aset</button></div>
-                                <Card className="p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3 text-left">Nama</th><th className="px-4 py-3 text-right">Nilai</th><th className="px-4 py-3"></th></tr></thead><tbody className="divide-y divide-slate-100">{assets.map(a=><tr key={a.id}><td className="px-4 py-3 font-medium">{a.name}</td><td className="px-4 py-3 text-right">{formatCurrency(a.value)}</td><td className="px-4 py-3 text-right"><button onClick={()=>deleteRecord('assets',a.id)} className="text-rose-400 hover:text-rose-600"><Trash2 size={16}/></button></td></tr>)}</tbody></table></Card>
+                        <div className="flex justify-between items-end">
+                            <div>
+                                <h2 className="text-2xl font-bold text-slate-800">Riwayat Transaksi</h2>
+                                <p className="text-slate-500">Catatan keluar masuk dana kerajaan.</p>
                             </div>
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-center"><h3 className="text-lg font-bold text-slate-800">Piutang</h3><button onClick={()=>{setEditData(null);setActiveModal('receivable')}} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">+ Piutang</button></div>
-                                <Card className="p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3 text-left">Nama</th><th className="px-4 py-3 text-right">Jumlah</th><th className="px-4 py-3 text-right">Aksi</th></tr></thead><tbody className="divide-y divide-slate-100">{receivables.map(r=><tr key={r.id} className={r.status==='paid'?'opacity-50 bg-slate-50':''}><td className="px-4 py-3 font-medium">{r.customerName}</td><td className="px-4 py-3 text-right font-bold text-slate-700">{formatCurrency(r.amount)}</td><td className="px-4 py-3 text-right flex justify-end gap-2">{r.status!=='paid' && <button onClick={()=>handlePayReceivable(r)} className="p-1 text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100" title="Lunasi"><Banknote size={16}/></button>}<button onClick={()=>deleteRecord('receivables',r.id)} className="p-1 text-rose-400 hover:text-rose-600"><Trash2 size={16}/></button></td></tr>)}</tbody></table></Card>
+                            <div className="hidden md:flex gap-3">
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-all active:scale-95"><Upload size={18}/> Import</button>
+                                <button onClick={() => {setEditData(null); setActiveModal('modal')}} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-xl hover:bg-teal-700 shadow-lg shadow-teal-200 transition-all active:scale-95"><Plus size={18}/> Input Modal</button>
+                                <button onClick={() => {setEditData(null); setActiveModal('sales')}} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 transition-all active:scale-95"><ShoppingCart size={18}/> Input Penjualan</button>
+                                <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 shadow-lg shadow-rose-200 transition-all active:scale-95"><Plus size={18}/> Pengeluaran</button>
+                                <button onClick={() => {setEditData(null); setActiveModal('transfer')}} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all active:scale-95"><ArrowUpRight size={18}/> Transfer / Tarik Tunai</button>
                             </div>
                         </div>
+
+                        <div className="flex md:hidden gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                            <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setActiveModal('import')}} className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm"><Upload size={16}/> Import</button>
+                            <button onClick={() => {setEditData(null); setActiveModal('modal')}} className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-xl text-sm"><Plus size={16}/> Modal</button>
+                            <button onClick={() => {setEditData(null); setActiveModal('sales')}} className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm"><ShoppingCart size={16}/> Jual</button>
+                            <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl text-sm"><Plus size={16}/> Keluar</button>
+                            <button onClick={() => {setEditData(null); setActiveModal('transfer')}} className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm">Transfer</button>
+                        </div>
+
+                        <Card className="overflow-hidden p-0">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="text-xs text-slate-500 uppercase bg-slate-50/50 border-b border-slate-100">
+                                        <tr>
+                                            <th className="px-6 py-4 font-semibold">Tanggal & Ket</th>
+                                            <th className="px-6 py-4 font-semibold">Kategori</th>
+                                            <th className="px-6 py-4 font-semibold">Jumlah</th>
+                                            <th className="px-6 py-4 font-semibold text-right">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {currentData.length > 0 ? currentData.map((t) => (
+                                            <tr key={t.id} className="hover:bg-slate-50/80 transition-colors">
+                                                <td className="px-6 py-4">
+                                                    <div className="font-bold text-slate-800">{t.description}</div>
+                                                    <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
+                                                        {formatDate(t.date)}
+                                                        {t.isStockSale && <span className="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] border border-indigo-100">Stok</span>}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                                                        t.type === 'income' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
+                                                        t.type === 'expense' ? 'bg-rose-50 text-rose-700 border-rose-100' : 
+                                                        'bg-indigo-50 text-indigo-700 border-indigo-100'}`}>
+                                                        {t.type === 'income' ? 'Masuk' : t.type === 'expense' ? 'Keluar' : 'Transfer'}
+                                                    </span>
+                                                    <div className="text-xs text-slate-400 mt-1 capitalize">{t.category || t.transferType?.replace(/_/g, ' ')}</div>
+                                                </td>
+                                                <td className={`px-6 py-4 font-bold ${t.type === 'income' ? 'text-emerald-600' : t.type === 'expense' ? 'text-rose-600' : 'text-slate-700'}`}>
+                                                    {t.type === 'expense' ? '-' : '+'} {formatCurrency(t.amount)}
+                                                    <div className="text-xs font-normal text-slate-400 mt-0.5 capitalize">{t.paymentMethod}</div>
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <div className="flex justify-end gap-2">
+                                                        <button onClick={() => {setEditData(t); setActiveModal(t.type === 'income' ? (t.category === 'modal' ? 'modal' : 'sales') : t.type)}} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"><Edit2 size={16}/></button>
+                                                        <button onClick={() => deleteRecord('transactions', t.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"><Trash2 size={16}/></button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )) : <tr><td colSpan="4" className="px-6 py-12 text-center text-slate-400">Belum ada catatan transaksi, Baginda.</td></tr>}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {totalPages > 1 && (
+                                <div className="flex justify-between items-center p-4 border-t border-slate-100 bg-slate-50/30">
+                                    <button onClick={() => setCurrentPage(p => Math.max(1, p-1))} disabled={currentPage===1} className="p-2 rounded-lg hover:bg-white disabled:opacity-50 border border-transparent hover:border-slate-200 transition"><ChevronLeft size={20} className="text-slate-500"/></button>
+                                    <span className="text-sm font-medium text-slate-500">Hal {currentPage} dari {totalPages}</span>
+                                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p+1))} disabled={currentPage===totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-50 border border-transparent hover:border-slate-200 transition"><ChevronRight size={20} className="text-slate-500"/></button>
+                                </div>
+                            )}
+                        </Card>
                     </div>
-                )}
-                {activeTab === 'targets' && (
-                    <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
-                        <div className="flex justify-between items-center"><h2 className="text-2xl font-bold text-slate-800">Target Bisnis</h2><button onClick={()=>{setEditData(null);setActiveModal('target')}} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200 transition"><Plus size={18}/> Target Baru</button></div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">{targets.map(t=>(<Card key={t.id} className="relative group hover:-translate-y-1 transition-transform duration-300 border-t-4 border-t-purple-500"><button onClick={()=>deleteRecord('targets',t.id)} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={18}/></button><h4 className="font-bold text-lg text-slate-800">{t.name}</h4><div className="text-3xl font-bold text-purple-700 my-4">{formatCurrency(t.targetAmount)}</div><div className="w-full bg-slate-100 rounded-full h-2 mb-2 overflow-hidden"><div className="bg-purple-500 h-full rounded-full animate-[width_1s_ease-out]" style={{width:'0%'}}></div></div><p className="text-xs text-slate-400">Periode: {t.period}</p></Card>))}</div>
+                );
+            };
+
+            const renderWarehouse = () => (
+                <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-800">Gudang Kerajaan</h2>
+                            <p className="text-slate-500">Inventaris stok barang dagangan.</p>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => {setEditData(null); setImportTypeState('products'); setActiveModal('import')}} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition"><Upload size={18}/> Import</button>
+                            <button onClick={() => {setEditData(null); setActiveModal('product')}} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition"><Plus size={18}/> Produk</button>
+                        </div>
                     </div>
-                )}
-            </div>
-        </main>
 
-        {/* Bottom Nav */}
-        <nav className="md:hidden fixed bottom-0 w-full bg-white border-t border-slate-200 px-6 py-2 flex justify-between items-center z-40 safe-area-pb">
-            <MobileNavItem icon={LayoutDashboard} label="Beranda" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-            <MobileNavItem icon={Banknote} label="Transaksi" active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} />
-            <div className="relative -top-5"><button onClick={() => {setEditData(null); setActiveModal('income')}} className="w-14 h-14 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-lg shadow-indigo-300 border-4 border-slate-50"><Plus size={28}/></button></div>
-            <MobileNavItem icon={Package} label="Gudang" active={activeTab === 'warehouse'} onClick={() => setActiveTab('warehouse')} />
-            <MobileNavItem icon={Menu} label="Menu" active={['reports', 'assets', 'targets'].includes(activeTab)} onClick={() => setActiveTab('assets')} />
-        </nav>
-
-        {/* ALL MODALS */}
-        <Modal isOpen={activeModal === 'modal'} onClose={() => setActiveModal(null)} title="Input Modal Usaha"><TransactionForm type="income" subtype="modal" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        <Modal isOpen={activeModal === 'sales'} onClose={() => setActiveModal(null)} title="Input Penjualan"><TransactionForm type="income" subtype="sales" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        <Modal isOpen={activeModal === 'income'} onClose={() => setActiveModal(null)} title="Input Pemasukan"><TransactionForm type="income" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        <Modal isOpen={activeModal === 'expense'} onClose={() => setActiveModal(null)} title="Input Pengeluaran"><TransactionForm type="expense" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        <Modal isOpen={activeModal === 'transfer'} onClose={() => setActiveModal(null)} title="Transfer Dana"><TransactionForm type="transfer" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        
-        {/* Product Modal */}
-        <Modal isOpen={activeModal === 'product'} onClose={() => setActiveModal(null)} title="Produk Gudang">
-             <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); const data = { name: fd.get('name'), price: parseFloat(fd.get('price')), stock: parseInt(fd.get('stock')) }; if(editData) updateRecord('products', editData.id, data); else addRecord('products', data); }} className="space-y-4">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Produk</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={editData?.name} placeholder="Contoh: Jersey Polos M" /></div>
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Harga Jual</label><input name="price" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={editData?.price} /></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Stok Awal</label><input name="stock" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={editData?.stock} /></div>
-                </div>
-                <button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl transition hover:bg-indigo-700 shadow-lg shadow-indigo-200">Simpan Produk</button>
-            </form>
-        </Modal>
-
-        {/* Target Modal */}
-        <Modal isOpen={activeModal === 'target'} onClose={() => setActiveModal(null)} title="Tetapkan Target Bisnis">
-            <form onSubmit={(e) => { 
-                e.preventDefault(); 
-                const fd = new FormData(e.target); 
-                addRecord('targets', { 
-                    name: fd.get('name'), 
-                    type: fd.get('type'), 
-                    targetAmount: parseFloat(fd.get('targetAmount')), 
-                    period: fd.get('period'), 
-                    startDate: fd.get('startDate'), 
-                    notes: fd.get('notes') 
-                }); 
-            }} className="space-y-4">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Judul Target</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500" placeholder="Contoh: Omzet Penjualan Januari" /></div>
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jenis Target</label><select name="type" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500"><option value="revenue">Omzet</option><option value="profit">Laba</option><option value="sales_count">Qty</option><option value="other">Lainnya</option></select></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Periode</label><select name="period" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500"><option value="monthly">Bulanan</option><option value="quarterly">Triwulan</option><option value="yearly">Tahunan</option></select></div>
-                </div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Angka Target</label><input name="targetAmount" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500" placeholder="0" /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mulai Tanggal</label><input name="startDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500" defaultValue={new Date().toISOString().split('T')[0]} /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Strategi / Catatan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500" placeholder="Contoh: Fokus genjot iklan di Instagram"></textarea></div>
-                <button className="w-full bg-purple-600 text-white font-bold py-3 rounded-xl transition hover:bg-purple-700 shadow-lg shadow-purple-200">Simpan Target</button>
-            </form>
-        </Modal>
-
-        {/* Asset Modal */}
-        <Modal isOpen={activeModal === 'asset'} onClose={() => setActiveModal(null)} title="Input Data Aset">
-            <form onSubmit={(e) => { 
-                e.preventDefault(); 
-                const fd = new FormData(e.target); 
-                addRecord('assets', { 
-                    name: fd.get('name'), 
-                    category: fd.get('category'), 
-                    value: parseFloat(fd.get('value')), 
-                    purchaseDate: fd.get('purchaseDate'), 
-                    condition: fd.get('condition'), 
-                    notes: fd.get('notes') 
-                }); 
-            }} className="space-y-4">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Aset</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Contoh: Mesin Jahit High Speed" /></div>
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kategori</label><select name="category" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"><option value="equipment">Peralatan</option><option value="electronic">Elektronik</option><option value="vehicle">Kendaraan</option><option value="furniture">Perabotan</option><option value="property">Properti</option><option value="other">Lainnya</option></select></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kondisi</label><select name="condition" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"><option value="good">Baik / Baru</option><option value="used">Bekas</option><option value="damaged">Rusak</option></select></div>
-                </div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nilai Aset (Rp)</label><input name="value" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tanggal Pembelian</label><input name="purchaseDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={new Date().toISOString().split('T')[0]} /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Keterangan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Catatan tambahan..."></textarea></div>
-                <button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl transition hover:bg-indigo-700 shadow-lg shadow-indigo-200">Simpan Aset</button>
-            </form>
-        </Modal>
-
-        {/* Receivable Modal */}
-        <Modal isOpen={activeModal === 'receivable'} onClose={() => setActiveModal(null)} title="Catat Piutang Baru">
-            <form onSubmit={(e) => { 
-                e.preventDefault(); 
-                const fd = new FormData(e.target); 
-                addRecord('receivables', { 
-                    customerName: fd.get('customerName'), 
-                    contactInfo: fd.get('contactInfo'), 
-                    amount: parseFloat(fd.get('amount')), 
-                    startDate: fd.get('startDate'), 
-                    dueDate: fd.get('dueDate'), 
-                    notes: fd.get('notes'), 
-                    status: 'pending' 
-                }); 
-            }} className="space-y-4">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Peminjam / Pelanggan</label><input name="customerName" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Nama Lengkap" /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kontak (HP/WA)</label><input name="contactInfo" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Contoh: 0812..." /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jumlah Piutang (Rp)</label><input name="amount" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-slate-700" placeholder="0" /></div>
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tanggal Pinjam</label><input name="startDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500" defaultValue={new Date().toISOString().split('T')[0]} /></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jatuh Tempo</label><input name="dueDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500" /></div>
-                </div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Catatan Keperluan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Contoh: Belum bayar sisa order jersey"></textarea></div>
-                <button className="w-full bg-amber-600 text-white font-bold py-3 rounded-xl transition hover:bg-amber-700 shadow-lg shadow-amber-200">Simpan Piutang</button>
-            </form>
-        </Modal>
-        
-        {/* Import Modal */}
-        <Modal isOpen={activeModal === 'import'} onClose={() => setActiveModal(null)} title="Import Data Excel">
-            <div className="space-y-5">
-                <div className="flex justify-between items-end">
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-1">Jenis Data</label>
-                        <p className="text-xs text-slate-400">Otomatis terpilih: <span className="font-bold text-indigo-600 uppercase">{importTypeState === 'transactions' ? `Transaksi (${importContext})` : 'Gudang Produk'}</span></p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {products.map(p => (
+                            <div key={p.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow group relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-50 rounded-bl-full -mr-12 -mt-12 transition-transform group-hover:scale-110"></div>
+                                <div className="flex justify-between items-start mb-4 relative z-10">
+                                    <div className="bg-indigo-50 p-3 rounded-xl text-indigo-600"><Package size={24} /></div>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => {setEditData(p); setActiveModal('product')}} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"><Edit2 size={16}/></button>
+                                        <button onClick={() => deleteRecord('products', p.id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><Trash2 size={16}/></button>
+                                    </div>
+                                </div>
+                                <h4 className="font-bold text-lg text-slate-800 mb-1">{p.name}</h4>
+                                <p className="text-sm text-slate-500 mb-4">{formatCurrency(p.price)} / pcs</p>
+                                <div className="bg-slate-50 rounded-xl p-3 flex justify-between items-center">
+                                    <span className="text-xs font-medium text-slate-500 uppercase">Stok Tersedia</span>
+                                    <span className={`text-lg font-bold ${p.stock <= 5 ? 'text-rose-600' : 'text-emerald-600'}`}>{p.stock} pcs</span>
+                                </div>
+                            </div>
+                        ))}
+                        {products.length === 0 && (
+                            <div className="col-span-full py-16 text-center border-2 border-dashed border-slate-200 rounded-3xl">
+                                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300"><Package size={32}/></div>
+                                <p className="text-slate-400 font-medium">Gudang masih kosong melompong.</p>
+                            </div>
+                        )}
                     </div>
-                    <button onClick={downloadTemplate} className="text-sm font-bold text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition flex items-center gap-1"><Download size={14}/> Unduh Template</button>
                 </div>
-                
-                <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-800">
-                    <p className="font-bold mb-2 flex items-center gap-2"><FileSpreadsheet size={16}/> Format Kolom Wajib:</p>
-                    {importContext === 'modal' ? (
-                        <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            <li><b>No</b> (Opsional)</li>
-                            <li><b>Tanggal</b> (YYYY-MM-DD)</li>
-                            <li><b>Jumlah</b> (Angka)</li>
-                            <li><b>Sumber</b> (Nama Investor/Sumber)</li>
-                            <li><b>Keterangan</b> (Catatan Tambahan)</li>
-                        </ul>
-                    ) : importContext === 'expense_noncash' ? (
-                        <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            <li><b>No</b> (Opsional)</li>
-                            <li><b>Tanggal</b> (YYYY-MM-DD)</li>
-                            <li><b>Item</b> (Nama Barang/Jasa) <span className="text-rose-600 text-xs font-bold">(Tulis 'Tarik Tunai' untuk Transfer)</span></li>
-                            <li><b>Jumlah</b> (Angka)</li>
-                            <li><b>Kategori</b> (Aset/Operasional/Produksi)</li>
-                            <li><b>Keterangan</b> (Opsional)</li>
-                        </ul>
-                    ) : importContext === 'expense_cash' ? (
-                        <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            <li><b>No</b> (Opsional)</li>
-                            <li><b>Tanggal</b> (YYYY-MM-DD)</li>
-                            <li><b>Item</b> (Nama Barang/Jasa)</li>
-                            <li><b>Jumlah</b> (Angka)</li>
-                            <li><b>Kategori</b> (Aset/Operasional/Produksi)</li>
-                            <li><b>Keterangan</b> (Opsional)</li>
-                        </ul>
-                    ) : importContext === 'expense' ? (
-                        <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            <li><b>No</b> (Opsional)</li>
-                            <li><b>Tanggal</b> (YYYY-MM-DD)</li>
-                            <li><b>Item</b> (Nama Barang/Jasa)</li>
-                            <li><b>Jumlah</b> (Angka)</li>
-                            <li><b>Kategori</b> (Aset/Operasional/Produksi)</li>
-                            <li><b>Keterangan</b> (Opsional)</li>
-                        </ul>
-                    ) : importTypeState === 'transactions' ? (
-                        <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            <li><b>Tanggal</b> (YYYY-MM-DD)</li>
-                            <li><b>Deskripsi/Sumber</b></li>
-                            <li><b>Jumlah</b></li>
-                            <li><b>Jenis</b> (income/expense) & <b>Kategori</b> (Opsional)</li>
-                        </ul>
-                    ) : (
-                        <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            <li><b>Nama</b> (Nama Produk)</li>
-                            <li><b>Harga</b> (Harga Jual)</li>
-                            <li><b>Stok</b> (Jumlah Awal)</li>
-                        </ul>
-                    )}
-                </div>
+            );
 
-                <div 
-                    className="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-50 transition group" 
-                    onClick={() => document.getElementById('file_upload').click()}
-                >
-                    <div className="p-3 bg-indigo-50 rounded-full mb-3 group-hover:scale-110 transition-transform">
-                        <FileSpreadsheet size={32} className="text-indigo-600" />
-                    </div>
-                    <span className="text-sm font-bold text-slate-700">Klik untuk pilih berkas Excel</span>
-                    <span className="text-xs text-slate-500 mt-1">atau tarik berkas ke sini</span>
-                    <input 
-                        id="file_upload" 
-                        type="file" 
-                        accept=".xlsx, .xls" 
-                        onChange={handleFileImport} 
-                        className="hidden" 
-                    />
+            // Transaction Form
+            const TransactionForm = ({ type, onClose, initialData, subtype }) => {
+                const [form, setForm] = useState(initialData || { 
+                    date: new Date().toISOString().split('T')[0], 
+                    amount: '', 
+                    description: '', 
+                    category: subtype === 'modal' ? 'modal' : (type === 'income' ? 'shopee' : (type === 'expense' ? 'produksi' : '')), 
+                    paymentMethod: 'cash', 
+                    transferType: 'bank_to_cash', 
+                    notes: '' 
+                });
+                const [useStock, setUseStock] = useState(false);
+                const [selProd, setSelProd] = useState('');
+                const [qty, setQty] = useState(1);
+
+                const handleProd = (pid) => {
+                    setSelProd(pid); const p = products.find(x=>x.id===pid);
+                    if(p) setForm(prev => ({...prev, description: `Penjualan: ${p.name} (${qty} pcs)`, amount: p.price*qty}));
+                };
+                const handleQty = (q) => {
+                    const nq = parseInt(q)||1; setQty(nq); const p = products.find(x=>x.id===selProd);
+                    if(p) setForm(prev => ({...prev, description: `Penjualan: ${p.name} (${nq} pcs)`, amount: p.price*nq}));
+                };
+
+                const submit = async (e) => {
+                    e.preventDefault();
+                    let data = {...form, amount: parseFloat(form.amount), type};
+                    
+                    if (subtype === 'modal') {
+                        data.category = 'modal';
+                    }
+
+                    if(type==='income' && useStock && selProd) {
+                        const p = products.find(x=>x.id===selProd);
+                        if(p.stock < qty) return alert("Stok kurang!");
+                        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'products', selProd), {stock: increment(-qty)});
+                        data = {...data, productId: selProd, quantity: qty, isStockSale: true};
+                    }
+                    if(initialData) await updateRecord('transactions', initialData.id, data); else await addRecord('transactions', data);
+                };
+
+                return (
+                    <form onSubmit={submit} className="space-y-5">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Tanggal</label><input type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} /></div>
+                            {type!=='transfer' && <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Metode</label><select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition" value={form.paymentMethod} onChange={e=>setForm({...form, paymentMethod:e.target.value})}><option value="cash">Tunai</option><option value="noncash">Transfer</option></select></div>}
+                        </div>
+
+                        {type==='income' && subtype !== 'modal' && (
+                            <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-xl">
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input type="checkbox" checked={useStock} onChange={e=>setUseStock(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300" />
+                                    <span className="font-semibold text-indigo-900">Ambil dari Stok Gudang</span>
+                                </label>
+                                {useStock && (
+                                    <div className="mt-4 grid grid-cols-3 gap-3 animate-fade-in">
+                                        <div className="col-span-2">
+                                            <select className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-sm" value={selProd} onChange={e=>handleProd(e.target.value)} required><option value="">Pilih Produk...</option>{products.map(p=><option key={p.id} value={p.id} disabled={p.stock<=0}>{p.name} (Sisa: {p.stock})</option>)}</select>
+                                        </div>
+                                        <div><input type="number" min="1" className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-sm" value={qty} onChange={e=>handleQty(e.target.value)} required /></div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {!useStock && (
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Deskripsi</label>
+                                <input type="text" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition" placeholder={type==='income'?"Contoh: Penjualan Jersey":"Contoh: Beli Token Listrik"} value={form.description} onChange={e=>setForm({...form, description:e.target.value})} />
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Jumlah (Rp)</label>
+                            <div className="relative">
+                                <span className="absolute left-4 top-2.5 text-slate-400 font-semibold">Rp</span>
+                                <input type="number" required min="0" className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition font-bold text-lg ${useStock ? 'bg-slate-100 text-slate-500' : 'text-slate-800'}`} value={form.amount} onChange={e=>setForm({...form, amount:e.target.value})} readOnly={useStock} />
+                            </div>
+                        </div>
+
+                        {type==='income' && (
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Kategori</label>
+                                {subtype === 'modal' ? (
+                                    <input type="text" value="Modal Usaha" disabled className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-500 font-medium" />
+                                ) : (
+                                    <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={form.category} onChange={e=>setForm({...form, category:e.target.value})}>
+                                        <option value="shopee">Shopee</option>
+                                        <option value="offline">Offline</option>
+                                        <option value="other">Lainnya</option>
+                                    </select>
+                                )}
+                            </div>
+                        )}
+                        
+                        {type==='expense' && <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Kategori</label><select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={form.category} onChange={e=>setForm({...form, category:e.target.value})}><option value="produksi">Produksi</option><option value="operasional">Operasional</option><option value="aset">Aset</option></select></div>}
+                        {type==='transfer' && <div><label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Arah Transfer</label><select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={form.transferType} onChange={e=>setForm({...form, transferType:e.target.value, description: e.target.value==='bank_to_cash'?'Tarik Tunai':'Setor Tunai'})}><option value="bank_to_cash">Bank ke Tunai (Tarik)</option><option value="cash_to_bank">Tunai ke Bank (Setor)</option></select></div>}
+
+                        <button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-indigo-200 transition active:scale-95">Simpan Data</button>
+                    </form>
+                );
+            };
+
+            if (isLoading) return <div className="flex h-screen items-center justify-center bg-slate-50"><div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div></div>;
+
+            return (
+                <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden">
+                    <aside className="hidden md:flex flex-col w-72 bg-white border-r border-slate-200 h-full relative z-20">
+                        <div className="p-8 pb-4">
+                            <div className="flex items-center gap-3 text-indigo-700 mb-1">
+                                <div className="p-2 bg-indigo-600 rounded-lg text-white"><TrendingUp size={24}/></div>
+                                <h1 className="text-xl font-bold tracking-tight">Hudan <span className="font-light">Sport</span></h1>
+                            </div>
+                            <p className="text-xs text-slate-400 pl-1">Finance System v2.0</p>
+                        </div>
+                        
+                        <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
+                            <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+                            <SidebarItem icon={Banknote} label="Transaksi" active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} />
+                            <SidebarItem icon={Package} label="Gudang Stok" active={activeTab === 'warehouse'} onClick={() => setActiveTab('warehouse')} />
+                            <SidebarItem icon={FileText} label="Laporan" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
+                            <SidebarItem icon={Building2} label="Aset & Piutang" active={activeTab === 'assets'} onClick={() => setActiveTab('assets')} />
+                            <SidebarItem icon={Target} label="Target Bisnis" active={activeTab === 'targets'} onClick={() => setActiveTab('targets')} />
+                        </nav>
+
+                        <div className="p-4 border-t border-slate-100">
+                            <div className="bg-slate-50 rounded-xl p-4 flex items-center gap-3">
+                                <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold">R</div>
+                                <div>
+                                    <div className="text-sm font-bold text-slate-800">Baginda Raja</div>
+                                    <div className="text-xs text-slate-500">Administrator</div>
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
+
+                    <main className="flex-1 h-full overflow-y-auto relative scroll-smooth">
+                        <header className="md:hidden bg-white/80 backdrop-blur-md sticky top-0 z-30 border-b border-slate-200 px-4 py-3 flex justify-between items-center">
+                            <div className="flex items-center gap-2 font-bold text-indigo-700">
+                                <div className="p-1.5 bg-indigo-600 rounded text-white"><TrendingUp size={18}/></div>
+                                <span>Hudan Sport</span>
+                            </div>
+                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 text-xs font-bold">R</div>
+                        </header>
+
+                        <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-full">
+                            {activeTab === 'dashboard' && renderDashboard()}
+                            {activeTab === 'transactions' && renderTransactions()}
+                            {activeTab === 'warehouse' && renderWarehouse()}
+                            {activeTab === 'reports' && (
+                                <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
+                                    <div className="flex justify-between items-center"><h2 className="text-2xl font-bold text-slate-800">Laporan Keuangan</h2></div>
+                                    <Card>
+                                        <div className="flex flex-col md:flex-row gap-4 items-end mb-6">
+                                            <div className="flex-1 w-full"><label className="text-xs font-semibold text-slate-500 uppercase mb-1">Mulai Tanggal</label><input type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={reportFilter.startDate} onChange={e=>setReportFilter({...reportFilter, startDate:e.target.value})} /></div>
+                                            <div className="flex-1 w-full"><label className="text-xs font-semibold text-slate-500 uppercase mb-1">Sampai Tanggal</label><input type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" value={reportFilter.endDate} onChange={e=>setReportFilter({...reportFilter, endDate:e.target.value})} /></div>
+                                            <div className="flex gap-2">
+                                                <button onClick={()=>exportToExcel(transactions, "Laporan")} className="p-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition" title="Export Excel"><FileSpreadsheet size={20}/></button>
+                                                <button onClick={()=>exportToPDF(["Tanggal","Deskripsi","Jumlah"], transactions.map(t=>[formatDate(t.date), t.description, formatCurrency(t.amount)]), "Laporan")} className="p-3 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition" title="Export PDF"><FileIcon size={20}/></button>
+                                            </div>
+                                        </div>
+                                        <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 text-slate-400">Silakan pilih rentang tanggal untuk mengunduh laporan detail.</div>
+                                    </Card>
+                                </div>
+                            )}
+                            {activeTab === 'assets' && (
+                                <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        <div className="space-y-4">
+                                            <div className="flex justify-between items-center"><h3 className="text-lg font-bold text-slate-800">Aset Kerajaan</h3><button onClick={()=>{setEditData(null);setActiveModal('asset')}} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">+ Aset</button></div>
+                                            <Card className="p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3 text-left">Nama</th><th className="px-4 py-3 text-right">Nilai</th><th className="px-4 py-3"></th></tr></thead><tbody className="divide-y divide-slate-100">{assets.map(a=><tr key={a.id}><td className="px-4 py-3 font-medium">{a.name}</td><td className="px-4 py-3 text-right">{formatCurrency(a.value)}</td><td className="px-4 py-3 text-right"><button onClick={()=>deleteRecord('assets',a.id)} className="text-rose-400 hover:text-rose-600"><Trash2 size={16}/></button></td></tr>)}</tbody></table></Card>
+                                        </div>
+                                        <div className="space-y-4">
+                                            <div className="flex justify-between items-center"><h3 className="text-lg font-bold text-slate-800">Piutang</h3><button onClick={()=>{setEditData(null);setActiveModal('receivable')}} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">+ Piutang</button></div>
+                                            <Card className="p-0 overflow-hidden"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3 text-left">Nama</th><th className="px-4 py-3 text-right">Jumlah</th><th className="px-4 py-3 text-right">Aksi</th></tr></thead><tbody className="divide-y divide-slate-100">{receivables.map(r=><tr key={r.id} className={r.status==='paid'?'opacity-50 bg-slate-50':''}><td className="px-4 py-3 font-medium">{r.customerName}</td><td className="px-4 py-3 text-right font-bold text-slate-700">{formatCurrency(r.amount)}</td><td className="px-4 py-3 text-right flex justify-end gap-2">{r.status!=='paid' && <button onClick={()=>handlePayReceivable(r)} className="p-1 text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100" title="Lunasi"><Banknote size={16}/></button>}<button onClick={()=>deleteRecord('receivables',r.id)} className="p-1 text-rose-400 hover:text-rose-600"><Trash2 size={16}/></button></td></tr>)}</tbody></table></Card>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                            {activeTab === 'targets' && (
+                                <div className="space-y-6 animate-fade-in pb-20 md:pb-0">
+                                    <div className="flex justify-between items-center"><h2 className="text-2xl font-bold text-slate-800">Target Bisnis</h2><button onClick={()=>{setEditData(null);setActiveModal('target')}} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200 transition"><Plus size={18}/> Target Baru</button></div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">{targets.map(t=>(<Card key={t.id} className="relative group hover:-translate-y-1 transition-transform duration-300 border-t-4 border-t-purple-500"><button onClick={()=>deleteRecord('targets',t.id)} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={18}/></button><h4 className="font-bold text-lg text-slate-800">{t.name}</h4><div className="text-3xl font-bold text-purple-700 my-4">{formatCurrency(t.targetAmount)}</div><div className="w-full bg-slate-100 rounded-full h-2 mb-2 overflow-hidden"><div className="bg-purple-500 h-full rounded-full animate-[width_1s_ease-out]" style={{width:'0%'}}></div></div><p className="text-xs text-slate-400">Periode: {t.period}</p></Card>))}</div>
+                                </div>
+                            )}
+                        </div>
+                    </main>
+
+                    <nav className="md:hidden fixed bottom-0 w-full bg-white border-t border-slate-200 px-6 py-2 flex justify-between items-center z-40 safe-area-pb">
+                        <MobileNavItem icon={LayoutDashboard} label="Home" active={activeTab==='dashboard'} onClick={()=>setActiveTab('dashboard')} />
+                        <MobileNavItem icon={Banknote} label="Trans" active={activeTab==='transactions'} onClick={()=>setActiveTab('transactions')} />
+                        <div className="relative -top-5"><button onClick={()=>{setEditData(null);setActiveModal('income')}} className="w-14 h-14 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-lg shadow-indigo-300 border-4 border-slate-50"><Plus size={28}/></button></div>
+                        <MobileNavItem icon={Package} label="Gudang" active={activeTab==='warehouse'} onClick={()=>setActiveTab('warehouse')} />
+                        <MobileNavItem icon={Menu} label="Menu" active={['reports','assets','targets'].includes(activeTab)} onClick={()=>setActiveTab('assets')} />
+                    </nav>
+
+                    <Modal isOpen={activeModal === 'modal'} onClose={() => setActiveModal(null)} title="Input Modal Usaha"><TransactionForm type="income" subtype="modal" onClose={() => setActiveModal(null)} initialData={editData} /></Modal>
+                    <Modal isOpen={activeModal === 'sales'} onClose={() => setActiveModal(null)} title="Input Penjualan"><TransactionForm type="income" subtype="sales" onClose={() => setActiveModal(null)} initialData={editData} /></Modal>
+                    <Modal isOpen={activeModal === 'income'} onClose={() => setActiveModal(null)} title={editData ? "Edit Pemasukan" : "Pemasukan Baru"}><TransactionForm type="income" onClose={() => setActiveModal(null)} initialData={editData} /></Modal>
+                    <Modal isOpen={activeModal === 'expense'} onClose={() => setActiveModal(null)} title={editData ? "Edit Pengeluaran" : "Pengeluaran Baru"}><TransactionForm type="expense" onClose={() => setActiveModal(null)} initialData={editData} /></Modal>
+                    <Modal isOpen={activeModal === 'transfer'} onClose={() => setActiveModal(null)} title="Transfer / Tarik Tunai"><TransactionForm type="transfer" onClose={() => setActiveModal(null)} initialData={editData} /></Modal>
+                    
+                    <Modal isOpen={activeModal === 'product'} onClose={() => setActiveModal(null)} title="Produk Gudang">
+                         <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); const data = { name: fd.get('name'), price: parseFloat(fd.get('price')), stock: parseInt(fd.get('stock')) }; if(editData) updateRecord('products', editData.id, data); else addRecord('products', data); }} className="space-y-4">
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Produk</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" defaultValue={editData?.name} placeholder="Contoh: Jersey Polos M" /></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Harga Jual</label><input name="price" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" defaultValue={editData?.price} /></div>
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Stok Awal</label><input name="stock" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" defaultValue={editData?.stock} /></div>
+                            </div>
+                            <button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl transition hover:bg-indigo-700">Simpan Produk</button>
+                        </form>
+                    </Modal>
+
+                    <Modal isOpen={activeModal === 'target'} onClose={() => setActiveModal(null)} title="Tetapkan Target Bisnis">
+                        <form onSubmit={(e) => { 
+                            e.preventDefault(); 
+                            const fd = new FormData(e.target); 
+                            addRecord('targets', { 
+                                name: fd.get('name'), 
+                                type: fd.get('type'),
+                                targetAmount: parseFloat(fd.get('targetAmount')), 
+                                period: fd.get('period'), 
+                                startDate: fd.get('startDate'),
+                                notes: fd.get('notes')
+                            }); 
+                        }} className="space-y-4">
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Judul Target</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="Contoh: Omzet Penjualan Januari" /></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jenis Target</label><select name="type" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5"><option value="revenue">Omzet</option><option value="profit">Laba</option><option value="sales_count">Qty</option><option value="other">Lainnya</option></select></div>
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Periode</label><select name="period" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5"><option value="monthly">Bulanan</option><option value="quarterly">Triwulan</option><option value="yearly">Tahunan</option></select></div>
+                            </div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Angka Target</label><input name="targetAmount" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="0" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mulai Tanggal</label><input name="startDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" defaultValue={new Date().toISOString().split('T')[0]} /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Strategi / Catatan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="Contoh: Fokus genjot iklan di Instagram"></textarea></div>
+                            <button className="w-full bg-purple-600 text-white font-bold py-3 rounded-xl transition hover:bg-purple-700 shadow-lg shadow-purple-200">Simpan Target</button>
+                        </form>
+                    </Modal>
+
+                    <Modal isOpen={activeModal === 'asset'} onClose={() => setActiveModal(null)} title="Input Data Aset">
+                        <form onSubmit={(e) => { 
+                            e.preventDefault(); 
+                            const fd = new FormData(e.target); 
+                            addRecord('assets', { 
+                                name: fd.get('name'), 
+                                category: fd.get('category'),
+                                value: parseFloat(fd.get('value')), 
+                                purchaseDate: fd.get('purchaseDate'),
+                                condition: fd.get('condition'),
+                                notes: fd.get('notes')
+                            }); 
+                        }} className="space-y-4">
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Aset</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="Contoh: Mesin Jahit High Speed" /></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kategori</label><select name="category" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5"><option value="equipment">Peralatan</option><option value="electronic">Elektronik</option><option value="vehicle">Kendaraan</option><option value="furniture">Perabotan</option><option value="property">Properti</option><option value="other">Lainnya</option></select></div>
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kondisi</label><select name="condition" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5"><option value="good">Baik / Baru</option><option value="used">Bekas</option><option value="damaged">Rusak</option></select></div>
+                            </div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nilai Aset (Rp)</label><input name="value" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="0" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tanggal Pembelian</label><input name="purchaseDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" defaultValue={new Date().toISOString().split('T')[0]} /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Keterangan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="Catatan tambahan..."></textarea></div>
+                            <button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl transition hover:bg-indigo-700 shadow-lg shadow-indigo-200">Simpan Aset</button>
+                        </form>
+                    </Modal>
+
+                    <Modal isOpen={activeModal === 'receivable'} onClose={() => setActiveModal(null)} title="Catat Piutang Baru">
+                        <form onSubmit={(e) => { 
+                            e.preventDefault(); 
+                            const fd = new FormData(e.target); 
+                            addRecord('receivables', { 
+                                customerName: fd.get('customerName'), 
+                                contactInfo: fd.get('contactInfo'),
+                                amount: parseFloat(fd.get('amount')), 
+                                startDate: fd.get('startDate'),
+                                dueDate: fd.get('dueDate'), 
+                                notes: fd.get('notes'),
+                                status: 'pending' 
+                            }); 
+                        }} className="space-y-4">
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Peminjam / Pelanggan</label><input name="customerName" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="Nama Lengkap" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kontak (HP/WA)</label><input name="contactInfo" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="Contoh: 0812..." /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jumlah Piutang (Rp)</label><input name="amount" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-slate-700" placeholder="0" /></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tanggal Pinjam</label><input name="startDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" defaultValue={new Date().toISOString().split('T')[0]} /></div>
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jatuh Tempo</label><input name="dueDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" /></div>
+                            </div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Catatan Keperluan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5" placeholder="Contoh: Belum bayar sisa order jersey"></textarea></div>
+                            <button className="w-full bg-amber-600 text-white font-bold py-3 rounded-xl transition hover:bg-amber-700 shadow-lg shadow-amber-200">Simpan Piutang</button>
+                        </form>
+                    </Modal>
+                    
+                    <Modal isOpen={activeModal === 'import'} onClose={() => setActiveModal(null)} title="Import Data Excel">
+                        <div className="space-y-5">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">Jenis Data yang Diimpor</label>
+                                <select className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" value={importTypeState} onChange={e => setImportTypeState(e.target.value)} disabled>
+                                    <option value="transactions">Transaksi (Pemasukan/Pengeluaran)</option>
+                                    <option value="products">Produk Gudang</option>
+                                </select>
+                                <p className="text-xs text-slate-400 mt-1">Jenis import otomatis terpilih berdasarkan menu tempat Anda berada.</p>
+                            </div>
+                            <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-800">
+                                <p className="font-bold mb-2 flex items-center gap-2"><FileSpreadsheet size={16}/> Format Kolom Excel:</p>
+                                {importTypeState === 'transactions' ? (<ul className="list-disc pl-5 space-y-1 text-indigo-700/80"><li><b>Tanggal</b> (YYYY-MM-DD)</li><li><b>Deskripsi</b></li><li><b>Jumlah</b></li><li><b>Jenis</b> (income/expense)</li></ul>) : (<ul className="list-disc pl-5 space-y-1 text-indigo-700/80"><li><b>Nama</b></li><li><b>Harga</b></li><li><b>Stok</b></li></ul>)}
+                            </div>
+                            <div className="relative"><input type="file" accept=".xlsx, .xls" onChange={handleFileImport} className="block w-full text-sm text-slate-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer bg-slate-50 rounded-xl border border-slate-200" /></div>
+                        </div>
+                    </Modal>
                 </div>
-                <p className="text-xs text-slate-400 text-center">Pastikan format kolom sesuai template agar data masuk dengan sempurna.</p>
-            </div>
-        </Modal>
-    </div>
-  );
-}
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<HudanSportwearApp />);
+    </script>
+</body>
+</html>
