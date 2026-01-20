@@ -66,7 +66,6 @@
         }
         .animate-enter { animation: fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         
-        /* Glass Effect Improved */
         .glass-panel { 
             background: rgba(255, 255, 255, 0.85); 
             backdrop-filter: blur(12px); 
@@ -96,7 +95,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, increment } from 'firebase/firestore';
 import { 
   LayoutDashboard, Banknote, FileText, TrendingUp, Target, Building2, Save, 
@@ -105,8 +104,10 @@ import {
   Sparkles, Bot, Loader2, MoreHorizontal, ArrowRight, CreditCard, PieChart, Activity
 } from 'lucide-react';
 
-/* --- FIREBASE CONFIGURATION --- */
-const firebaseConfig = {
+/* --- FIREBASE CONFIGURATION (ADAPTIVE / HYBRID) --- */
+// BAGINDA: Jika ingin upload ke GitHub/Hosting sendiri, isi data ini dari Firebase Console Anda.
+// Jika kosong/default, aplikasi akan meminta konfigurasi saat dijalankan di luar sistem ini.
+const manualConfig = {
     apiKey: "AIzaSyCfEuuRtxv2A8uhIIs7Z4YQr6Me3ifaamc",
     authDomain: "hudan-finance-196fc.firebaseapp.com",
     projectId: "hudan-finance-196fc",
@@ -115,13 +116,19 @@ const firebaseConfig = {
     appId: "1:675437915381:web:905a074fa153e37ce969bc"
 };
 
+// Logika Adaptif: Gunakan config sistem jika ada (Preview), jika tidak gunakan manualConfig (GitHub/Public)
+const firebaseConfig = (typeof __firebase_config !== 'undefined') 
+    ? JSON.parse(__firebase_config) 
+    : manualConfig;
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'hudan-sportwear-web';
+// Gunakan ID sistem jika ada, atau fallback ke ID umum untuk versi publik
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'hudan-sportwear-public';
 
 /* --- GEMINI API SETUP --- */
-const apiKey = ""; // <-- Masukkan API Key Gemini Baginda di sini
+const apiKey = ""; // <-- Masukkan API Key Gemini Baginda di sini jika ingin fitur AI aktif
 
 const callGemini = async (prompt, isJson = false) => {
   if (!apiKey) {
@@ -171,20 +178,6 @@ const formatDate = (dateString) => {
       return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
   }
   return dateString;
-};
-
-const loadScript = (src) => {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = src;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
 };
 
 const getGreeting = () => {
@@ -413,7 +406,6 @@ function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
-  const [libsLoaded, setLibsLoaded] = useState(false);
   
   // Data State
   const [transactions, setTransactions] = useState([]);
@@ -440,38 +432,100 @@ function App() {
   const [importContext, setImportContext] = useState('all'); 
   const [transTab, setTransTab] = useState('all');
 
+  /* --- AUTH & INIT (STRICT PROTOCOL) --- */
   useEffect(() => {
-    Promise.all([
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'),
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
-      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
-    ]).then(() => setLibsLoaded(true)).catch(err => console.error("Failed to load libs", err));
-  }, []);
-
-  useEffect(() => {
-    const initAuth = async () => { try { await signInAnonymously(auth); } catch (error) { console.error("Login gagal:", error); } };
+    const initAuth = async () => {
+      try {
+        // Cek apakah token sistem tersedia (hanya di environment preview ini)
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+           await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+           // Fallback untuk GitHub/Hosting luar: Login Anonim
+           // Pastikan Baginda mengaktifkan "Anonymous Auth" di Firebase Console
+           await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Login gagal:", error);
+        // Peringatan ramah jika dijalankan di GitHub tapi config belum diisi
+        if (firebaseConfig.apiKey.includes("GANTI_DENGAN")) {
+            alert("TITAH SISTEM: Aplikasi berjalan di mode publik (GitHub/Lokal), namun Konfigurasi Firebase belum diisi.\n\nSilakan edit file index.html pada bagian 'manualConfig' dengan kredensial Firebase Baginda agar data dapat disimpan.");
+        }
+      }
+    };
     initAuth();
-    return onAuthStateChanged(auth, (u) => { setUser(u); setIsLoading(false); });
+    
+    const unsubscribe = onAuthStateChanged(auth, (u) => { 
+        setUser(u); 
+        setIsLoading(false); 
+    });
+    return () => unsubscribe();
   }, []);
 
+  /* --- FIRESTORE LISTENERS (CORRECT PATHS) --- */
   useEffect(() => {
     if (!user) return;
+    // PERBAIKAN: Menggunakan jalur 'public' -> 'data' agar semua perangkat melihat data yang sama
+    const basePath = ['artifacts', appId, 'public', 'data'];
+    
     const subs = [
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'), s => setTransactions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.date)-new Date(a.date)))),
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'assets'), s => setAssets(s.docs.map(d => ({id:d.id, ...d.data()})))),
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'receivables'), s => setReceivables(s.docs.map(d => ({id:d.id, ...d.data()})))),
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'targets'), s => setTargets(s.docs.map(d => ({id:d.id, ...d.data()})))),
-        onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'products'), s => setProducts(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => a.name.localeCompare(b.name))))
+        onSnapshot(collection(db, ...basePath, 'transactions'), 
+            s => setTransactions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.date)-new Date(a.date))),
+            err => console.error("Err Trans:", err)
+        ),
+        onSnapshot(collection(db, ...basePath, 'assets'), 
+            s => setAssets(s.docs.map(d => ({id:d.id, ...d.data()}))),
+            err => console.error("Err Assets:", err)
+        ),
+        onSnapshot(collection(db, ...basePath, 'receivables'), 
+            s => setReceivables(s.docs.map(d => ({id:d.id, ...d.data()}))),
+            err => console.error("Err Receive:", err)
+        ),
+        onSnapshot(collection(db, ...basePath, 'targets'), 
+            s => setTargets(s.docs.map(d => ({id:d.id, ...d.data()}))),
+            err => console.error("Err Target:", err)
+        ),
+        onSnapshot(collection(db, ...basePath, 'products'), 
+            s => setProducts(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => a.name.localeCompare(b.name))),
+            err => console.error("Err Prod:", err)
+        )
     ];
     return () => subs.forEach(unsub => unsub());
   }, [user]);
 
-  /* --- CRUD & LOGIC (Condensed for brevity, same logic as before) --- */
-  const addRecord = async (col, data) => { if (!user) return; await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, col), { ...data, createdAt: new Date().toISOString() }); setActiveModal(null); };
-  const updateRecord = async (col, id, data) => { if (!user) return; await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, col, id), data); setEditData(null); setActiveModal(null); };
-  const deleteRecord = async (col, id) => { if (!confirm('Hapus data ini Baginda?')) return; await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, col, id)); };
-  const handleTransactionSave = async (data, id, autoW, stockUp) => { if (autoW) await addRecord('transactions', autoW); if (stockUp) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'products', stockUp.id), {stock: increment(stockUp.qty)}); if (id) await updateRecord('transactions', id, data); else await addRecord('transactions', data); };
-  const handlePayReceivable = async (r) => { if(!confirm('Lunasi piutang ini?')) return; await updateDoc(doc(db,'artifacts',appId,'users',user.uid,'receivables',r.id),{status:'paid'}); await addRecord('transactions',{date:new Date().toISOString().split('T')[0],description:`Pelunasan: ${r.customerName}`,amount:parseFloat(r.amount),type:'income',category:'other',paymentMethod:'cash',notes:'Otomatis'}); };
+  /* --- CRUD & LOGIC --- */
+  // PERBAIKAN: Fungsi CRUD juga diarahkan ke jalur 'public' -> 'data'
+  const getCollectionRef = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
+  const getDocRef = (colName, docId) => doc(db, 'artifacts', appId, 'public', 'data', colName, docId);
+
+  const addRecord = async (col, data) => { 
+      if (!user) return; 
+      await addDoc(getCollectionRef(col), { ...data, createdAt: new Date().toISOString(), createdBy: user.uid }); 
+      setActiveModal(null); 
+  };
+  
+  const updateRecord = async (col, id, data) => { 
+      if (!user) return; 
+      await updateDoc(getDocRef(col, id), { ...data, updatedAt: new Date().toISOString(), updatedBy: user.uid }); 
+      setEditData(null); setActiveModal(null); 
+  };
+  
+  const deleteRecord = async (col, id) => { 
+      if (!confirm('Hapus data ini Baginda?')) return; 
+      await deleteDoc(getDocRef(col, id)); 
+  };
+  
+  const handleTransactionSave = async (data, id, autoW, stockUp) => { 
+      if (autoW) await addRecord('transactions', autoW); 
+      if (stockUp) await updateDoc(getDocRef('products', stockUp.id), {stock: increment(stockUp.qty)}); 
+      if (id) await updateRecord('transactions', id, data); 
+      else await addRecord('transactions', data); 
+  };
+  
+  const handlePayReceivable = async (r) => { 
+      if(!confirm('Lunasi piutang ini?')) return; 
+      await updateDoc(getDocRef('receivables', r.id),{status:'paid'}); 
+      await addRecord('transactions',{date:new Date().toISOString().split('T')[0],description:`Pelunasan: ${r.customerName}`,amount:parseFloat(r.amount),type:'income',category:'other',paymentMethod:'cash',notes:'Otomatis'}); 
+  };
 
   const dashboardStats = useMemo(() => {
     let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0;
@@ -526,7 +580,6 @@ function App() {
 
   /* --- IMPORT LOGIC RESTORED & UPGRADED --- */
   const downloadTemplate = () => {
-    if (!libsLoaded) return alert("Pustaka Excel belum siap.");
     let data = [];
     let fileName = "Template_Import";
 
@@ -550,8 +603,6 @@ function App() {
       if (!file) return;
       if (!user) return alert("Harap tunggu login selesai...");
 
-      // Deteksi Metode Pembayaran dari Nama File
-      // Namun sekarang akan di-override oleh tombol yang diklik Baginda
       const isNonTunaiFile = file.name.toLowerCase().includes('non-tunai') || file.name.toLowerCase().includes('non tunai');
       const isTunaiFile = file.name.toLowerCase().includes('tunai') && !isNonTunaiFile;
 
@@ -561,22 +612,18 @@ function App() {
               const data = new Uint8Array(evt.target.result);
               const workbook = window.XLSX.read(data, { type: 'array' });
               const sheetName = workbook.SheetNames[0];
-              // Use raw: false to treat everything as strings initially to prevent date misinterpretation
               const jsonData = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {raw: false});
 
               if (jsonData.length === 0) return alert("Berkas kosong.");
               
-              // DIAGNOSTIC ALERT: Tampilkan baris pertama
               const firstRow = jsonData[0];
               const keys = Object.keys(firstRow);
-              // Find keys case-insensitively
               const keyMap = {
                   tanggal: keys.find(k=>k.toLowerCase().includes('tgl') || k.toLowerCase().includes('date') || k.toLowerCase() === 'tanggal'),
                   item: keys.find(k=>k.toLowerCase().includes('item') || k.toLowerCase().includes('deskripsi') || k.toLowerCase().includes('uraian')),
                   jumlah: keys.find(k=>k.toLowerCase().includes('jumlah') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('nominal'))
               };
               
-              // Tentukan Label Metode untuk Diagnostik
               let methodLabel = "Otomatis";
               if (importContext === 'transfer') methodLabel = "TRANSFER (Bank)";
               else if (importContext === 'cash') methodLabel = "TUNAI (Kas)";
@@ -606,18 +653,11 @@ function App() {
                       const tDate = getVal('tanggal') || getVal('date');
                       
                       if (tDate) {
-                          // Handle various date formats including Excel strings
-                          // Format 1: 44598 (Excel serial) - processed as string by raw:false, so skip this check if using raw:false
-                          // Format 2: "2022-02-06" (ISO)
-                          // Format 3: "06/02/2022" (ID/UK)
-                          
                           let parsedDate = null;
                           const dateStr = String(tDate).trim();
                           
-                          // Check for DD/MM/YYYY or DD-MM-YYYY
                           if (dateStr.match(/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}$/)) {
                               const parts = dateStr.split(/[\/-]/);
-                              // Assume DD-MM-YYYY for Indonesia
                               parsedDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
                           } else {
                               parsedDate = new Date(dateStr);
@@ -631,40 +671,31 @@ function App() {
                       const description = getVal('item') || getVal('sumber') || getVal('deskripsi') || 'Imported';
                       const descLower = String(description).toLowerCase();
                       
-                      // LOGIKA CERDAS DETEKSI TIPE & METODE
                       let rawType = 'expense'; 
                       let paymentMethod = 'cash'; 
                       let transferType = null;
 
-                      // 1. Tentukan Metode Pembayaran berdasarkan TOMBOL YANG DIKLIK (importContext)
                       if (importContext === 'transfer') {
                           paymentMethod = 'noncash';
                       } else if (importContext === 'cash') {
                           paymentMethod = 'cash';
                       } else if (importContext === 'income') {
-                          rawType = 'income'; // TIPE KHUSUS PEMASUKAN
-                          // Default income biasanya ke Bank (noncash), tapi bisa juga Cash.
-                          // Kita deteksi dari nama file atau kolom metode jika ada.
+                          rawType = 'income';
                           paymentMethod = 'noncash'; 
                           if (isTunaiFile) paymentMethod = 'cash';
                       } else {
-                          // Fallback ke Nama File jika context 'all'
                           if (isNonTunaiFile) paymentMethod = 'noncash';
                           else if (isTunaiFile) paymentMethod = 'cash';
                       }
 
-                      // 2. Deteksi Khusus "Kas Tunai" di file Non-Tunai / Transfer
                       if (descLower.includes('kas tunai') || descLower.includes('tarik tunai')) {
                           rawType = 'transfer';
                           transferType = 'bank_to_cash'; 
                           paymentMethod = 'noncash'; 
                       } 
-                      // 3. Deteksi Pemasukan (bisa dikembangkan)
                       else if (getVal('kategori')?.toLowerCase() === 'pemasukan' || getVal('jumlah') < 0) {
-                           // Keep existing logic
                       }
 
-                      // Amount Cleaning
                       let rawAmount = getVal('jumlah') || 0;
                       if (typeof rawAmount === 'string') {
                           rawAmount = rawAmount.replace(/[^0-9,-]/g, ''); 
@@ -674,7 +705,7 @@ function App() {
                           date: finalDate,
                           description: description,
                           amount: Math.abs(parseFloat(rawAmount) || 0), 
-                          type: rawType, // Menggunakan tipe yang sudah ditentukan di atas
+                          type: rawType,
                           category: (getVal('kategori') || (rawType === 'income' ? 'modal' : 'lainnya')).toLowerCase(),
                           paymentMethod: paymentMethod,
                           transferType: transferType,
@@ -695,7 +726,8 @@ function App() {
                   
                   if (docData && user.uid && docData.amount !== 0) { 
                       try {
-                          await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, type), docData); 
+                          // PERBAIKAN: Import juga diarahkan ke 'public' -> 'data'
+                          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', type), docData); 
                           count++; 
                       } catch (err) {
                           console.error("Gagal simpan baris:", err);
@@ -774,7 +806,7 @@ function App() {
                                                 <Sparkles size={14} className="text-yellow-400 animate-pulse"/> {getGreeting()}, Baginda
                                             </p>
                                             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-2">
-                                                Rp {formatCurrency(dashboardStats.balance).replace('Rp', '').trim()}
+                                                {formatCurrency(dashboardStats.balance).replace('Rp', 'Rp ')}
                                             </h2>
                                             <p className="text-slate-300 text-sm font-light opacity-80">Total Kekayaan Likuid (Kas + Bank)</p>
                                         </div>
@@ -907,7 +939,6 @@ function App() {
                                 <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('cash'); setActiveModal('import')}} className="px-5 py-3 bg-white text-amber-600 border border-amber-100 rounded-2xl hover:bg-amber-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
                                     <Upload size={16}/> Import Tunai
                                 </button>
-                                {/* TOMBOL BARU: IMPORT PEMASUKAN */}
                                 <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('income'); setActiveModal('import')}} className="px-5 py-3 bg-white text-emerald-600 border border-emerald-100 rounded-2xl hover:bg-emerald-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
                                     <Upload size={16}/> Import Masuk
                                 </button>
@@ -1014,7 +1045,7 @@ function App() {
                                 </table>
                             </div>
                             
-                            {/* Tombol Hapus Semua Data (Fitur Baru untuk Reset) */}
+                            {/* Tombol Hapus Semua Data */}
                             {transactions.length > 0 && transTab === 'all' && (
                                 <div className="p-4 bg-rose-50 border-t border-rose-100 flex justify-end">
                                     <button 
@@ -1028,7 +1059,8 @@ function App() {
                                                         let count = 0;
                                                         for (const t of transactions) {
                                                             if (count >= limit) break;
-                                                            await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', t.id));
+                                                            // PERBAIKAN: Delete loop diarahkan ke public path
+                                                            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', t.id));
                                                             count++;
                                                         }
                                                         alert(`Berhasil menghapus ${count} data transaksi.`);
@@ -1059,10 +1091,9 @@ function App() {
                     </div>
                 )}
 
-                {/* --- WAREHOUSE & OTHER TABS (UPDATED) --- */}
+                {/* --- WAREHOUSE --- */}
                 {activeTab === 'warehouse' && (
                     <div className="space-y-8 animate-enter">
-                        {/* Header & Actions */}
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div>
                                 <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Gudang Kerajaan</h2>
@@ -1078,7 +1109,6 @@ function App() {
                             </div>
                         </div>
 
-                        {/* Warehouse Stats (Calculated on the fly) */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4 relative overflow-hidden group">
                                 <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl"><Package size={24}/></div>
@@ -1106,7 +1136,6 @@ function App() {
                             </div>
                         </div>
                         
-                        {/* Search Bar */}
                         <div className="relative group">
                             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                 <Search className="text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={20}/>
@@ -1120,7 +1149,6 @@ function App() {
                             />
                         </div>
 
-                        {/* Product Grid */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                             {products.filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(prodSearch.toLowerCase()))).map(p => {
                                 const stockStatus = p.stock <= 5 ? 'critical' : p.stock <= 10 ? 'warning' : 'good';
@@ -1499,7 +1527,7 @@ function App() {
             <MobileNavItem icon={Menu} label="Menu" active={['reports', 'assets', 'targets'].includes(activeTab)} onClick={() => setActiveTab('assets')} />
         </nav>
 
-        {/* --- MODALS & FORMS (Reusing the same components but handled by state) --- */}
+        {/* --- MODALS & FORMS --- */}
         <Modal isOpen={activeModal === 'modal'} onClose={() => setActiveModal(null)} title="Input Modal Usaha"><TransactionForm type="income" subtype="modal" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         <Modal isOpen={activeModal === 'sales'} onClose={() => setActiveModal(null)} title="Input Penjualan"><TransactionForm type="income" subtype="sales" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         <Modal isOpen={activeModal === 'income'} onClose={() => setActiveModal(null)} title="Input Pemasukan"><TransactionForm type="income" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
@@ -1520,7 +1548,6 @@ function App() {
             </form>
         </Modal>
 
-        {/* RESTORED MODALS (Fix for missing buttons) */}
         <Modal isOpen={activeModal === 'asset'} onClose={() => setActiveModal(null)} title="Input Data Aset">
             <form onSubmit={(e) => { 
                 e.preventDefault(); 
