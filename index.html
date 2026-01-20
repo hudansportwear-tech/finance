@@ -641,6 +641,12 @@ function App() {
                           paymentMethod = 'noncash';
                       } else if (importContext === 'cash') {
                           paymentMethod = 'cash';
+                      } else if (importContext === 'income') {
+                          rawType = 'income'; // TIPE KHUSUS PEMASUKAN
+                          // Default income biasanya ke Bank (noncash), tapi bisa juga Cash.
+                          // Kita deteksi dari nama file atau kolom metode jika ada.
+                          paymentMethod = 'noncash'; 
+                          if (isTunaiFile) paymentMethod = 'cash';
                       } else {
                           // Fallback ke Nama File jika context 'all'
                           if (isNonTunaiFile) paymentMethod = 'noncash';
@@ -648,23 +654,19 @@ function App() {
                       }
 
                       // 2. Deteksi Khusus "Kas Tunai" di file Non-Tunai / Transfer
-                      // "Kas Tunai" di file Transfer = Penarikan dari Bank ke Kas
                       if (descLower.includes('kas tunai') || descLower.includes('tarik tunai')) {
                           rawType = 'transfer';
-                          transferType = 'bank_to_cash'; // Uang pindah Bank -> Kas
-                          paymentMethod = 'noncash'; // Sumber dana dari Bank
+                          transferType = 'bank_to_cash'; 
+                          paymentMethod = 'noncash'; 
                       } 
                       // 3. Deteksi Pemasukan (bisa dikembangkan)
                       else if (getVal('kategori')?.toLowerCase() === 'pemasukan' || getVal('jumlah') < 0) {
-                          // Jika user menandai negatif sebagai pengeluaran, kita harus hati-hati. 
-                          // Asumsi Excel Baginda: Positif = Jumlah uang transaksi.
+                           // Keep existing logic
                       }
 
                       // Amount Cleaning
                       let rawAmount = getVal('jumlah') || 0;
                       if (typeof rawAmount === 'string') {
-                          // Remove currency symbols, dots (thousand separators in ID), etc.
-                          // Assume format: 100.000 (ID) -> 100000
                           rawAmount = rawAmount.replace(/[^0-9,-]/g, ''); 
                       }
 
@@ -672,8 +674,8 @@ function App() {
                           date: finalDate,
                           description: description,
                           amount: Math.abs(parseFloat(rawAmount) || 0), 
-                          type: rawType,
-                          category: (getVal('kategori') || 'lainnya').toLowerCase(),
+                          type: rawType, // Menggunakan tipe yang sudah ditentukan di atas
+                          category: (getVal('kategori') || (rawType === 'income' ? 'modal' : 'lainnya')).toLowerCase(),
                           paymentMethod: paymentMethod,
                           transferType: transferType,
                           notes: getVal('keterangan') || '',
@@ -904,6 +906,10 @@ function App() {
                                 </button>
                                 <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('cash'); setActiveModal('import')}} className="px-5 py-3 bg-white text-amber-600 border border-amber-100 rounded-2xl hover:bg-amber-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
                                     <Upload size={16}/> Import Tunai
+                                </button>
+                                {/* TOMBOL BARU: IMPORT PEMASUKAN */}
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('income'); setActiveModal('import')}} className="px-5 py-3 bg-white text-emerald-600 border border-emerald-100 rounded-2xl hover:bg-emerald-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                                    <Upload size={16}/> Import Masuk
                                 </button>
 
                                 <button onClick={() => {setEditData(null); setActiveModal('income')}} className="px-5 py-3 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
