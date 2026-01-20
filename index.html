@@ -551,6 +551,7 @@ function App() {
       if (!user) return alert("Harap tunggu login selesai...");
 
       // Deteksi Metode Pembayaran dari Nama File
+      // Namun sekarang akan di-override oleh tombol yang diklik Baginda
       const isNonTunaiFile = file.name.toLowerCase().includes('non-tunai') || file.name.toLowerCase().includes('non tunai');
       const isTunaiFile = file.name.toLowerCase().includes('tunai') && !isNonTunaiFile;
 
@@ -574,8 +575,16 @@ function App() {
                   item: keys.find(k=>k.toLowerCase().includes('item') || k.toLowerCase().includes('deskripsi') || k.toLowerCase().includes('uraian')),
                   jumlah: keys.find(k=>k.toLowerCase().includes('jumlah') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('nominal'))
               };
+              
+              // Tentukan Label Metode untuk Diagnostik
+              let methodLabel = "Otomatis";
+              if (importContext === 'transfer') methodLabel = "TRANSFER (Bank)";
+              else if (importContext === 'cash') methodLabel = "TUNAI (Kas)";
 
-              const diagMsg = `DIAGNOSTIK BARIS PERTAMA:\n` +
+              const diagMsg = `LAPORAN DIAGNOSTIK:\n` +
+                              `Metode Import: ${methodLabel}\n` +
+                              `File: ${file.name}\n\n` +
+                              `Contoh Data Baris 1:\n` +
                               `Item: ${firstRow[keyMap.item] || '?'}\n` +
                               `Tanggal: ${firstRow[keyMap.tanggal] || '?'}\n` +
                               `Jumlah: ${firstRow[keyMap.jumlah] || '?'}\n\n` +
@@ -627,19 +636,28 @@ function App() {
                       let paymentMethod = 'cash'; 
                       let transferType = null;
 
-                      if (isNonTunaiFile) {
+                      // 1. Tentukan Metode Pembayaran berdasarkan TOMBOL YANG DIKLIK (importContext)
+                      if (importContext === 'transfer') {
                           paymentMethod = 'noncash';
-                      } else if (isTunaiFile) {
+                      } else if (importContext === 'cash') {
                           paymentMethod = 'cash';
+                      } else {
+                          // Fallback ke Nama File jika context 'all'
+                          if (isNonTunaiFile) paymentMethod = 'noncash';
+                          else if (isTunaiFile) paymentMethod = 'cash';
                       }
 
+                      // 2. Deteksi Khusus "Kas Tunai" di file Non-Tunai / Transfer
+                      // "Kas Tunai" di file Transfer = Penarikan dari Bank ke Kas
                       if (descLower.includes('kas tunai') || descLower.includes('tarik tunai')) {
                           rawType = 'transfer';
-                          transferType = 'bank_to_cash'; 
-                          paymentMethod = 'noncash'; 
+                          transferType = 'bank_to_cash'; // Uang pindah Bank -> Kas
+                          paymentMethod = 'noncash'; // Sumber dana dari Bank
                       } 
-                      else if (getVal('kategori')?.toLowerCase() === 'pemasukan') {
-                           // Keep existing logic or default to expense if not explicit
+                      // 3. Deteksi Pemasukan (bisa dikembangkan)
+                      else if (getVal('kategori')?.toLowerCase() === 'pemasukan' || getVal('jumlah') < 0) {
+                          // Jika user menandai negatif sebagai pengeluaran, kita harus hati-hati. 
+                          // Asumsi Excel Baginda: Positif = Jumlah uang transaksi.
                       }
 
                       // Amount Cleaning
@@ -649,7 +667,7 @@ function App() {
                           // Assume format: 100.000 (ID) -> 100000
                           rawAmount = rawAmount.replace(/[^0-9,-]/g, ''); 
                       }
-                      
+
                       docData = {
                           date: finalDate,
                           description: description,
@@ -880,15 +898,19 @@ function App() {
                                 <p className="text-slate-500 mt-2 font-medium">Jejak arus kas masuk dan keluar kerajaan.</p>
                             </div>
                             <div className="flex gap-3">
-                                {/* TOMBOL IMPORT YANG HILANG SUDAH KEMBALI */}
-                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setActiveModal('import')}} className="px-6 py-3 bg-white text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 font-bold text-sm transition-all active:scale-95 flex items-center gap-2">
-                                    <Upload size={20}/> Import
+                                {/* DUAL IMPORT BUTTONS */}
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('transfer'); setActiveModal('import')}} className="px-5 py-3 bg-white text-indigo-600 border border-indigo-100 rounded-2xl hover:bg-indigo-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                                    <Upload size={16}/> Import Transfer
                                 </button>
-                                <button onClick={() => {setEditData(null); setActiveModal('income')}} className="px-6 py-3 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 font-bold text-sm transition-all active:scale-95 flex items-center gap-2">
-                                    <ArrowDownRight size={20}/> Pemasukan
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('cash'); setActiveModal('import')}} className="px-5 py-3 bg-white text-amber-600 border border-amber-100 rounded-2xl hover:bg-amber-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                                    <Upload size={16}/> Import Tunai
                                 </button>
-                                <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="px-6 py-3 bg-rose-600 text-white rounded-2xl hover:bg-rose-700 shadow-lg shadow-rose-200 font-bold text-sm transition-all active:scale-95 flex items-center gap-2">
-                                    <ArrowUpRight size={20}/> Pengeluaran
+
+                                <button onClick={() => {setEditData(null); setActiveModal('income')}} className="px-5 py-3 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
+                                    <ArrowDownRight size={18}/> Pemasukan
+                                </button>
+                                <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="px-5 py-3 bg-rose-600 text-white rounded-2xl hover:bg-rose-700 shadow-lg shadow-rose-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
+                                    <ArrowUpRight size={18}/> Pengeluaran
                                 </button>
                             </div>
                         </div>
