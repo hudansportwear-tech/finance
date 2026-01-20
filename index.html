@@ -527,6 +527,36 @@ function App() {
       await addRecord('transactions',{date:new Date().toISOString().split('T')[0],description:`Pelunasan: ${r.customerName}`,amount:parseFloat(r.amount),type:'income',category:'other',paymentMethod:'cash',notes:'Otomatis'}); 
   };
 
+  // FITUR BARU: Koreksi Saldo Otomatis (Opname Kas)
+  const handleAdjustCash = async (e) => {
+      e.preventDefault();
+      const realBalance = parseFloat(e.target.realBalance.value);
+      const currentBalance = dashboardStats.cashBalance;
+      const diff = realBalance - currentBalance;
+
+      if (diff === 0) {
+          alert("Saldo sudah sesuai, Baginda.");
+          setActiveModal(null);
+          return;
+      }
+
+      const adjustmentData = {
+          date: new Date().toISOString().split('T')[0],
+          description: 'Koreksi Saldo Kas (Opname)',
+          amount: Math.abs(diff),
+          category: 'modal', // Masuk ke kategori modal/lainnya agar netral
+          paymentMethod: 'cash',
+          type: diff > 0 ? 'income' : 'expense', // Kalau kurang bikin income, kalau lebih bikin expense
+          notes: `Penyesuaian manual dari sistem. Saldo lama: ${formatCurrency(currentBalance)}`,
+          createdAt: new Date().toISOString()
+      };
+
+      if (confirm(`Sistem akan membuat transaksi otomatis sebesar ${formatCurrency(Math.abs(diff))} agar saldo menjadi ${formatCurrency(realBalance)}. Lanjutkan?`)) {
+          await addRecord('transactions', adjustmentData);
+          alert("Saldo berhasil disesuaikan!");
+      }
+  };
+
   const dashboardStats = useMemo(() => {
     let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0;
     transactions.forEach(t => {
@@ -856,7 +886,7 @@ function App() {
                             <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col justify-center">
                                 <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><CreditCard size={20} className="text-indigo-500"/> Rincian Penyimpanan</h3>
                                 <div className="space-y-4">
-                                    <div className="relative p-5 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
+                                    <div className="relative p-5 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden group">
                                         <div className="flex justify-between items-center relative z-10">
                                             <div className="flex items-center gap-4">
                                                 <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-indigo-600 shadow-sm"><Banknote size={24}/></div>
@@ -865,7 +895,10 @@ function App() {
                                                     <p className="text-[10px] text-slate-400 uppercase tracking-wider">Fisik di Laci</p>
                                                 </div>
                                             </div>
-                                            <span className="text-lg font-bold text-slate-800">{formatCurrency(dashboardStats.cashBalance)}</span>
+                                            <div className="text-right">
+                                                <span className="text-lg font-bold text-slate-800 block">{formatCurrency(dashboardStats.cashBalance)}</span>
+                                                <button onClick={() => setActiveModal('adjustCash')} className="text-[10px] text-indigo-600 font-bold hover:underline hover:text-indigo-800 transition">Koreksi Saldo?</button>
+                                            </div>
                                         </div>
                                         <div className="absolute right-0 top-0 h-full w-2 bg-indigo-500"></div>
                                     </div>
@@ -1530,6 +1563,28 @@ function App() {
         {/* --- MODALS & FORMS --- */}
         <Modal isOpen={activeModal === 'modal'} onClose={() => setActiveModal(null)} title="Input Modal Usaha"><TransactionForm type="income" subtype="modal" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         <Modal isOpen={activeModal === 'sales'} onClose={() => setActiveModal(null)} title="Input Penjualan"><TransactionForm type="income" subtype="sales" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
+        
+        {/* Modal Koreksi Saldo */}
+        <Modal isOpen={activeModal === 'adjustCash'} onClose={() => setActiveModal(null)} title="Koreksi Saldo Kas (Opname)">
+            <form onSubmit={handleAdjustCash} className="space-y-5">
+                <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl text-sm text-amber-800">
+                    <p className="font-bold flex items-center gap-2 mb-1"><Activity size={16}/> Penyesuaian Otomatis</p>
+                    <p>Masukkan jumlah uang fisik yang sebenarnya ada di laci. Sistem akan mencatat selisihnya secara otomatis.</p>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Saldo di Aplikasi</label>
+                    <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 font-bold text-slate-500">
+                        {formatCurrency(dashboardStats.cashBalance)}
+                    </div>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Saldo Fisik Sebenarnya (Rp)</label>
+                    <input name="realBalance" type="number" required min="0" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-lg text-slate-800" placeholder="0" />
+                </div>
+                <button className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">Sesuaikan Saldo Sekarang</button>
+            </form>
+        </Modal>
+
         <Modal isOpen={activeModal === 'income'} onClose={() => setActiveModal(null)} title="Input Pemasukan"><TransactionForm type="income" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         <Modal isOpen={activeModal === 'expense'} onClose={() => setActiveModal(null)} title="Input Pengeluaran"><TransactionForm type="expense" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         <Modal isOpen={activeModal === 'transfer'} onClose={() => setActiveModal(null)} title="Transfer Dana"><TransactionForm type="transfer" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
