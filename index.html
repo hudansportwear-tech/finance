@@ -105,8 +105,6 @@ import {
 } from 'lucide-react';
 
 /* --- FIREBASE CONFIGURATION (ADAPTIVE / HYBRID) --- */
-// BAGINDA: Jika ingin upload ke GitHub/Hosting sendiri, isi data ini dari Firebase Console Anda.
-// Jika kosong/default, aplikasi akan meminta konfigurasi saat dijalankan di luar sistem ini.
 const manualConfig = {
     apiKey: "AIzaSyCfEuuRtxv2A8uhIIs7Z4YQr6Me3ifaamc",
     authDomain: "hudan-finance-196fc.firebaseapp.com",
@@ -116,7 +114,6 @@ const manualConfig = {
     appId: "1:675437915381:web:905a074fa153e37ce969bc"
 };
 
-// Logika Adaptif: Gunakan config sistem jika ada (Preview), jika tidak gunakan manualConfig (GitHub/Public)
 const firebaseConfig = (typeof __firebase_config !== 'undefined') 
     ? JSON.parse(__firebase_config) 
     : manualConfig;
@@ -124,15 +121,14 @@ const firebaseConfig = (typeof __firebase_config !== 'undefined')
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-// Gunakan ID sistem jika ada, atau fallback ke ID umum untuk versi publik
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'hudan-sportwear-public';
 
 /* --- GEMINI API SETUP --- */
-const apiKey = ""; // <-- Masukkan API Key Gemini Baginda di sini jika ingin fitur AI aktif
+const apiKey = ""; // <-- ISI API KEY GEMINI DI SINI JIKA MAU AI NYALA, TUAN
 
 const callGemini = async (prompt, isJson = false) => {
   if (!apiKey) {
-      alert("Baginda belum memasukkan API Key Gemini di dalam kode!");
+      alert("API Key Gemini belum diisi di kode, Tuan. Fitur AI tidak bisa jalan.");
       return null;
   }
   try {
@@ -152,7 +148,7 @@ const callGemini = async (prompt, isJson = false) => {
     return data.candidates?.[0]?.content?.parts?.[0]?.text;
   } catch (error) {
     console.error("Gemini Error:", error);
-    alert("Maaf Baginda, koneksi ke AI terganggu.");
+    alert("Koneksi ke AI gagal, Tuan. Cek internet atau kuota API.");
     return null;
   }
 };
@@ -182,10 +178,10 @@ const formatDate = (dateString) => {
 
 const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 11) return "Selamat Pagi";
-    if (hour < 15) return "Selamat Siang";
-    if (hour < 19) return "Selamat Sore";
-    return "Selamat Malam";
+    if (hour < 11) return "Pagi";
+    if (hour < 15) return "Siang";
+    if (hour < 19) return "Sore";
+    return "Malam";
 };
 
 /* --- UI COMPONENTS --- */
@@ -258,7 +254,8 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
         transferType: 'bank_to_cash', 
         notes: '' 
     });
-    const [useStock, setUseStock] = useState(false);
+    // MODIFIKASI: Default useStock nyala kalau subtype-nya 'stock_sale'
+    const [useStock, setUseStock] = useState(subtype === 'stock_sale');
     const [selProd, setSelProd] = useState('');
     const [qty, setQty] = useState(1);
     const [magicPrompt, setMagicPrompt] = useState('');
@@ -273,7 +270,7 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
             try {
                 const parsed = JSON.parse(result);
                 setForm(prev => ({ ...prev, ...parsed }));
-            } catch (e) { alert("AI bingung, Baginda."); }
+            } catch (e) { alert("AI gagal memproses, Tuan. Coba manual saja."); }
         }
         setIsMagicLoading(false);
     };
@@ -305,13 +302,12 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
         if (type === 'expense' && form.paymentMethod === 'cash' && !initialData) {
             const expenseAmount = parseFloat(form.amount);
             if (expenseAmount > dashboardStats.cashBalance) {
-                const kekurangan = expenseAmount - dashboardStats.cashBalance;
                 const isConfirmed = confirm(
-                    `⚠️ Saldo Kas Tunai Tidak Cukup!\n\n` +
-                    `Saldo Kas saat ini: ${formatCurrency(dashboardStats.cashBalance)}\n` +
+                    `⚠️ Saldo Kas Tunai Kurang!\n\n` +
+                    `Saldo Kas: ${formatCurrency(dashboardStats.cashBalance)}\n` +
                     `Pengeluaran: ${formatCurrency(expenseAmount)}\n\n` +
-                    `Sistem akan mencatat "TARIK TUNAI" otomatis dari Bank sebesar ${formatCurrency(expenseAmount)} agar alur transaksi tercatat rapi.\n\n` +
-                    `Lanjutkan?`
+                    `Sistem akan catat "TARIK TUNAI" otomatis dari Bank untuk menutupi ini.\n\n` +
+                    `Lanjut, Tuan?`
                 );
 
                 if (isConfirmed) {
@@ -323,7 +319,7 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
                         transferType: 'bank_to_cash',
                         category: 'system', 
                         paymentMethod: 'noncash',
-                        notes: `Dana talangan otomatis untuk pembayaran: ${form.description}`,
+                        notes: `Dana talangan otomatis untuk: ${form.description}`,
                         createdAt: new Date().toISOString()
                     };
                 } else {
@@ -336,17 +332,16 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
     };
 
     const inputClass = "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all font-medium text-slate-700 placeholder:text-slate-400";
-    const labelClass = "block text-xs font-bold text-slate-500 uppercase mb-1.5 tracking-wide";
-
+    
     return (
         <form onSubmit={submit} className="space-y-6">
             {!useStock && !initialData && type !== 'transfer' && (
                 <div className="bg-gradient-to-r from-violet-50 to-indigo-50 border border-indigo-100 p-4 rounded-2xl relative overflow-hidden group">
-                     <label className="block text-xs font-bold text-indigo-600 uppercase mb-2 flex items-center gap-1"><Sparkles size={12} /> Isi Otomatis dengan AI</label>
-                     <div className="flex gap-2">
+                      <label className="block text-xs font-bold text-indigo-600 uppercase mb-2 flex items-center gap-1"><Sparkles size={12} /> Isi Cepat pakai AI</label>
+                      <div className="flex gap-2">
                         <input type="text" className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-400/50 outline-none" placeholder="Contoh: Beli kain 2.5jt" value={magicPrompt} onChange={(e) => setMagicPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleMagicFill())}/>
                         <button type="button" onClick={handleMagicFill} disabled={isMagicLoading} className="bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">{isMagicLoading ? <Loader2 className="animate-spin" size={18}/> : <Sparkles size={18}/>}</button>
-                     </div>
+                      </div>
                 </div>
             )}
 
@@ -361,7 +356,7 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
                 <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl">
                     <label className="flex items-center gap-3 cursor-pointer">
                         <input type="checkbox" checked={useStock} onChange={e => setUseStock(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded-md focus:ring-indigo-500 border-gray-300" />
-                        <span className="font-semibold text-slate-700">Ambil dari Stok Gudang</span>
+                        <span className="font-semibold text-slate-700">Potong Stok Gudang</span>
                     </label>
                     {useStock && (
                         <div className="mt-4 grid grid-cols-3 gap-3 animate-enter">
@@ -373,11 +368,11 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
             )}
 
             {!useStock && (
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Deskripsi</label><input type="text" required className={inputClass} placeholder={type === 'income' ? "Contoh: Penjualan Jersey" : "Contoh: Beli Token Listrik"} value={form.description} onChange={e => setForm({...form, description: e.target.value})} /></div>
+                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Keterangan</label><input type="text" required className={inputClass} placeholder={type === 'income' ? "Contoh: Penjualan Jersey" : "Contoh: Beli Token Listrik"} value={form.description} onChange={e => setForm({...form, description: e.target.value})} /></div>
             )}
 
             <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jumlah (Rp)</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nominal (Rp)</label>
                 <div className="relative">
                     <span className="absolute left-4 top-3.5 text-slate-400 font-bold">Rp</span>
                     <input type="number" required min="0" className={`w-full border border-slate-200 rounded-xl pl-12 pr-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/50 font-bold text-xl ${useStock ? 'bg-slate-100 text-slate-500' : 'bg-white text-slate-800'}`} value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} readOnly={useStock} />
@@ -436,19 +431,15 @@ function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Cek apakah token sistem tersedia (hanya di environment preview ini)
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
            await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-           // Fallback untuk GitHub/Hosting luar: Login Anonim
-           // Pastikan Baginda mengaktifkan "Anonymous Auth" di Firebase Console
            await signInAnonymously(auth);
         }
       } catch (error) {
         console.error("Login gagal:", error);
-        // Peringatan ramah jika dijalankan di GitHub tapi config belum diisi
         if (firebaseConfig.apiKey.includes("GANTI_DENGAN")) {
-            alert("TITAH SISTEM: Aplikasi berjalan di mode publik (GitHub/Lokal), namun Konfigurasi Firebase belum diisi.\n\nSilakan edit file index.html pada bagian 'manualConfig' dengan kredensial Firebase Baginda agar data dapat disimpan.");
+            alert("Tuan, config Firebase belum diisi. Mode offline.");
         }
       }
     };
@@ -461,10 +452,9 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  /* --- FIRESTORE LISTENERS (CORRECT PATHS) --- */
+  /* --- FIRESTORE LISTENERS --- */
   useEffect(() => {
     if (!user) return;
-    // PERBAIKAN: Menggunakan jalur 'public' -> 'data' agar semua perangkat melihat data yang sama
     const basePath = ['artifacts', appId, 'public', 'data'];
     
     const subs = [
@@ -493,7 +483,6 @@ function App() {
   }, [user]);
 
   /* --- CRUD & LOGIC --- */
-  // PERBAIKAN: Fungsi CRUD juga diarahkan ke jalur 'public' -> 'data'
   const getCollectionRef = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
   const getDocRef = (colName, docId) => doc(db, 'artifacts', appId, 'public', 'data', colName, docId);
 
@@ -510,7 +499,9 @@ function App() {
   };
   
   const deleteRecord = async (col, id) => { 
-      if (!confirm('Hapus data ini Baginda?')) return; 
+      // CATATAN: Hapus data transaksi tidak otomatis mengembalikan stok barang.
+      // Ini fitur pengaman agar stok tidak kacau jika data lama dihapus.
+      if (!confirm('Yakin hapus data ini, Tuan? Stok barang tidak akan berubah.')) return; 
       await deleteDoc(getDocRef(col, id)); 
   };
   
@@ -522,12 +513,12 @@ function App() {
   };
   
   const handlePayReceivable = async (r) => { 
-      if(!confirm('Lunasi piutang ini?')) return; 
+      if(!confirm('Tandai lunas?')) return; 
       await updateDoc(getDocRef('receivables', r.id),{status:'paid'}); 
       await addRecord('transactions',{date:new Date().toISOString().split('T')[0],description:`Pelunasan: ${r.customerName}`,amount:parseFloat(r.amount),type:'income',category:'other',paymentMethod:'cash',notes:'Otomatis'}); 
   };
 
-  // FITUR BARU: Koreksi Saldo Otomatis (Opname Kas)
+  // Koreksi Saldo Otomatis (Opname Kas)
   const handleAdjustCash = async (e) => {
       e.preventDefault();
       const realBalance = parseFloat(e.target.realBalance.value);
@@ -535,25 +526,25 @@ function App() {
       const diff = realBalance - currentBalance;
 
       if (diff === 0) {
-          alert("Saldo sudah sesuai, Baginda.");
+          alert("Saldo sudah pas, Tuan.");
           setActiveModal(null);
           return;
       }
 
       const adjustmentData = {
           date: new Date().toISOString().split('T')[0],
-          description: 'Koreksi Saldo Kas (Opname)',
+          description: 'Koreksi Saldo (Opname)',
           amount: Math.abs(diff),
-          category: 'modal', // Masuk ke kategori modal/lainnya agar netral
+          category: 'modal', 
           paymentMethod: 'cash',
-          type: diff > 0 ? 'income' : 'expense', // Kalau kurang bikin income, kalau lebih bikin expense
-          notes: `Penyesuaian manual dari sistem. Saldo lama: ${formatCurrency(currentBalance)}`,
+          type: diff > 0 ? 'income' : 'expense',
+          notes: `Penyesuaian manual. Saldo lama: ${formatCurrency(currentBalance)}`,
           createdAt: new Date().toISOString()
       };
 
-      if (confirm(`Sistem akan membuat transaksi otomatis sebesar ${formatCurrency(Math.abs(diff))} agar saldo menjadi ${formatCurrency(realBalance)}. Lanjutkan?`)) {
+      if (confirm(`Sistem akan buat transaksi otomatis ${formatCurrency(Math.abs(diff))} biar saldo jadi ${formatCurrency(realBalance)}. Gas?`)) {
           await addRecord('transactions', adjustmentData);
-          alert("Saldo berhasil disesuaikan!");
+          alert("Saldo beres!");
       }
   };
 
@@ -569,9 +560,10 @@ function App() {
   }, [transactions, assets, receivables]);
 
   const handleAdvisor = async () => {
+    if (!apiKey) return alert("API Key Gemini belum diisi, Tuan. Masukkan di kode dulu.");
     setShowAdvisor(true); setAdvisorAnalysis(''); setIsAdvisorLoading(true);
-    const prompt = `Anda penasihat keuangan kerajaan Hudan Sportwear. Data: Masuk ${dashboardStats.income}, Keluar ${dashboardStats.expense}, Kas ${dashboardStats.cashBalance}, Bank ${dashboardStats.nonCashBalance}. Berikan 1 paragraf ringkasan kesehatan keuangan dan 3 poin saran strategis. Gunakan bahasa sopan kerajaan (Baginda).`;
-    const res = await callGemini(prompt); setAdvisorAnalysis(res || "Maaf Baginda, bola kristal berkabut."); setIsAdvisorLoading(false);
+    const prompt = `Anda asisten bisnis pribadi yang santai dan jujur untuk 'Tuan'. Data: Masuk ${dashboardStats.income}, Keluar ${dashboardStats.expense}, Kas ${dashboardStats.cashBalance}, Bank ${dashboardStats.nonCashBalance}. Berikan ringkasan singkat dan 3 saran taktis langsung ke poinnya. Jangan pakai bahasa kaku.`;
+    const res = await callGemini(prompt); setAdvisorAnalysis(res || "Maaf Tuan, analisis gagal diambil."); setIsAdvisorLoading(false);
   };
 
   // Report Data Calculation
@@ -579,7 +571,7 @@ function App() {
     if (!reportFilter.startDate || !reportFilter.endDate) return null;
     const start = new Date(reportFilter.startDate);
     const end = new Date(reportFilter.endDate);
-    end.setHours(23, 59, 59, 999); // Include full end date
+    end.setHours(23, 59, 59, 999); 
 
     const filtered = transactions.filter(t => {
         const tDate = new Date(t.date);
@@ -602,20 +594,37 @@ function App() {
 
   const exportToPDF = (headers, data, title) => {
     if (!window.jspdf) return;
-    const doc = new window.jspdf.jsPDF();
-    doc.text(title, 14, 20);
-    doc.autoTable({ head: [headers], body: data, startY: 30, theme: 'grid' });
-    doc.save(`${title}.pdf`);
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        // Cek plugin autotable
+        if (doc.autoTable) {
+            doc.text(title, 14, 20);
+            doc.autoTable({ head: [headers], body: data, startY: 30, theme: 'grid' });
+            doc.save(`${title}.pdf`);
+        } else {
+            alert("Plugin PDF belum siap total, coba refresh dan tunggu sebentar.");
+        }
+    } catch(e) {
+        console.error(e);
+        alert("Gagal bikin PDF, Tuan.");
+    }
   };
 
-  /* --- IMPORT LOGIC RESTORED & UPGRADED --- */
+  /* --- IMPORT LOGIC --- */
   const downloadTemplate = () => {
     let data = [];
     let fileName = "Template_Import";
 
     if (importTypeState === 'transactions') {
-        data = [{ "No": 1, "Tanggal": "2024-01-01", "Item": "Keterangan Transaksi", "Jumlah": 100000, "Kategori": "Operasional", "Keterangan": "Catatan tambahan" }];
-        fileName = "Template_Transaksi";
+        if (importContext === 'sales') {
+             data = [{ "No": 1, "Tanggal": "2024-01-01", "Barang": "Jersey Hudan V1", "Qty": 2, "Total": 150000, "Channel": "Shopee", "Catatan": "Lunas" }];
+             fileName = "Template_Penjualan";
+        } else {
+             data = [{ "No": 1, "Tanggal": "2024-01-01", "Item": "Keterangan Transaksi", "Jumlah": 100000, "Kategori": "Operasional", "Keterangan": "Catatan tambahan" }];
+             fileName = "Template_Transaksi";
+        }
     } else {
         data = [{ "SKU": "JRS-001", "Nama": "Jersey Polos M", "Kategori": "Jersey", "Harga_Beli": 50000, "Harga_Jual": 75000, "Stok": 50, "Supplier": "Vendor A" }];
         fileName = "Template_Produk_Gudang";
@@ -631,7 +640,7 @@ function App() {
       const type = importTypeState;
       const file = e.target.files[0];
       if (!file) return;
-      if (!user) return alert("Harap tunggu login selesai...");
+      if (!user) return alert("Tunggu login dulu, Tuan.");
 
       const isNonTunaiFile = file.name.toLowerCase().includes('non-tunai') || file.name.toLowerCase().includes('non tunai');
       const isTunaiFile = file.name.toLowerCase().includes('tunai') && !isNonTunaiFile;
@@ -644,28 +653,26 @@ function App() {
               const sheetName = workbook.SheetNames[0];
               const jsonData = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {raw: false});
 
-              if (jsonData.length === 0) return alert("Berkas kosong.");
+              if (jsonData.length === 0) return alert("File kosong, Tuan.");
               
               const firstRow = jsonData[0];
               const keys = Object.keys(firstRow);
               const keyMap = {
                   tanggal: keys.find(k=>k.toLowerCase().includes('tgl') || k.toLowerCase().includes('date') || k.toLowerCase() === 'tanggal'),
-                  item: keys.find(k=>k.toLowerCase().includes('item') || k.toLowerCase().includes('deskripsi') || k.toLowerCase().includes('uraian')),
-                  jumlah: keys.find(k=>k.toLowerCase().includes('jumlah') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('nominal'))
+                  item: keys.find(k=>k.toLowerCase().includes('item') || k.toLowerCase().includes('deskripsi') || k.toLowerCase().includes('uraian') || k.toLowerCase().includes('barang')),
+                  jumlah: keys.find(k=>k.toLowerCase().includes('jumlah') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('nominal') || k.toLowerCase().includes('total'))
               };
               
               let methodLabel = "Otomatis";
               if (importContext === 'transfer') methodLabel = "TRANSFER (Bank)";
               else if (importContext === 'cash') methodLabel = "TUNAI (Kas)";
+              else if (importContext === 'sales') methodLabel = "PENJUALAN";
 
-              const diagMsg = `LAPORAN DIAGNOSTIK:\n` +
-                              `Metode Import: ${methodLabel}\n` +
-                              `File: ${file.name}\n\n` +
-                              `Contoh Data Baris 1:\n` +
-                              `Item: ${firstRow[keyMap.item] || '?'}\n` +
-                              `Tanggal: ${firstRow[keyMap.tanggal] || '?'}\n` +
-                              `Jumlah: ${firstRow[keyMap.jumlah] || '?'}\n\n` +
-                              `Apakah data terbaca benar, Baginda?`;
+              const diagMsg = `CEK DATA:\n` +
+                              `Metode: ${methodLabel}\n` +
+                              `File: ${file.name}\n` +
+                              `Sample Baris 1: ${firstRow[keyMap.item] || '?'}\n\n` +
+                              `Data sudah benar, Tuan?`;
               if (!confirm(diagMsg)) { e.target.value = null; return; }
 
               setIsLoading(true);
@@ -698,21 +705,31 @@ function App() {
                           }
                       }
 
-                      const description = getVal('item') || getVal('sumber') || getVal('deskripsi') || 'Imported';
+                      let description = getVal('item') || getVal('sumber') || getVal('deskripsi') || 'Imported';
+                      
+                      // Handling khusus Import Penjualan
+                      if (importContext === 'sales') {
+                          const barang = getVal('barang') || getVal('nama barang') || 'Barang';
+                          const qty = getVal('qty') || getVal('jumlah barang') || 1;
+                          description = `Penjualan: ${barang} (${qty} pcs)`;
+                      }
+
                       const descLower = String(description).toLowerCase();
                       
                       let rawType = 'expense'; 
                       let paymentMethod = 'cash'; 
                       let transferType = null;
+                      let category = (getVal('kategori') || getVal('channel') || 'umum').toLowerCase();
 
                       if (importContext === 'transfer') {
                           paymentMethod = 'noncash';
                       } else if (importContext === 'cash') {
                           paymentMethod = 'cash';
-                      } else if (importContext === 'income') {
+                      } else if (importContext === 'income' || importContext === 'sales') {
                           rawType = 'income';
                           paymentMethod = 'noncash'; 
                           if (isTunaiFile) paymentMethod = 'cash';
+                          if (importContext === 'sales' && !getVal('kategori') && !getVal('channel')) category = 'shopee'; // Default sales to Shopee if unknown
                       } else {
                           if (isNonTunaiFile) paymentMethod = 'noncash';
                           else if (isTunaiFile) paymentMethod = 'cash';
@@ -723,10 +740,11 @@ function App() {
                           transferType = 'bank_to_cash'; 
                           paymentMethod = 'noncash'; 
                       } 
-                      else if (getVal('kategori')?.toLowerCase() === 'pemasukan' || getVal('jumlah') < 0) {
+                      else if (category === 'pemasukan' || getVal('jumlah') < 0) {
+                          // Logic tambahan jika needed
                       }
 
-                      let rawAmount = getVal('jumlah') || 0;
+                      let rawAmount = getVal('jumlah') || getVal('total') || 0;
                       if (typeof rawAmount === 'string') {
                           rawAmount = rawAmount.replace(/[^0-9,-]/g, ''); 
                       }
@@ -736,10 +754,10 @@ function App() {
                           description: description,
                           amount: Math.abs(parseFloat(rawAmount) || 0), 
                           type: rawType,
-                          category: (getVal('kategori') || (rawType === 'income' ? 'modal' : 'lainnya')).toLowerCase(),
+                          category: category,
                           paymentMethod: paymentMethod,
                           transferType: transferType,
-                          notes: getVal('keterangan') || '',
+                          notes: getVal('keterangan') || getVal('catatan') || '',
                           createdAt: new Date().toISOString()
                       };
                   } else {
@@ -756,7 +774,6 @@ function App() {
                   
                   if (docData && user.uid && docData.amount !== 0) { 
                       try {
-                          // PERBAIKAN: Import juga diarahkan ke 'public' -> 'data'
                           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', type), docData); 
                           count++; 
                       } catch (err) {
@@ -765,7 +782,7 @@ function App() {
                   }
               }
               setIsLoading(false);
-              alert(`Sukses import ${count} data dari ${file.name}.`);
+              alert(`Sukses import ${count} data.`);
               setActiveModal(null);
               e.target.value = null;
           } catch (err) { console.error(err); setIsLoading(false); alert("Gagal proses file: " + err.message); }
@@ -803,10 +820,10 @@ function App() {
 
             <div className="p-5 border-t border-slate-50">
                 <div className="bg-slate-50 rounded-2xl p-4 flex items-center gap-3 border border-slate-100">
-                    <div className="w-10 h-10 bg-gradient-to-br from-slate-200 to-slate-300 rounded-full flex items-center justify-center text-slate-600 font-bold shadow-inner">R</div>
+                    <div className="w-10 h-10 bg-gradient-to-br from-slate-200 to-slate-300 rounded-full flex items-center justify-center text-slate-600 font-bold shadow-inner">T</div>
                     <div>
-                        <div className="text-sm font-bold text-slate-800">Baginda Raja</div>
-                        <div className="text-xs text-slate-500 font-medium">Administrator</div>
+                        <div className="text-sm font-bold text-slate-800">Tuan Admin</div>
+                        <div className="text-xs text-slate-500 font-medium">Hudan Sportwear</div>
                     </div>
                 </div>
             </div>
@@ -820,7 +837,7 @@ function App() {
                     <div className="p-2 bg-indigo-600 rounded-lg text-white"><TrendingUp size={18}/></div>
                     <span>Hudan Sport</span>
                 </div>
-                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 text-xs font-bold ring-2 ring-indigo-50">R</div>
+                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 text-xs font-bold ring-2 ring-indigo-50">T</div>
             </header>
 
             <div className="p-5 md:p-10 max-w-7xl mx-auto min-h-full pb-32">
@@ -833,12 +850,12 @@ function App() {
                                     <div className="flex justify-between items-start">
                                         <div>
                                             <p className="text-indigo-200 text-sm font-medium mb-1 flex items-center gap-2">
-                                                <Sparkles size={14} className="text-yellow-400 animate-pulse"/> {getGreeting()}, Baginda
+                                                <Sparkles size={14} className="text-yellow-400 animate-pulse"/> Halo, {getGreeting()} Tuan
                                             </p>
                                             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-2">
                                                 {formatCurrency(dashboardStats.balance).replace('Rp', 'Rp ')}
                                             </h2>
-                                            <p className="text-slate-300 text-sm font-light opacity-80">Total Kekayaan Likuid (Kas + Bank)</p>
+                                            <p className="text-slate-300 text-sm font-light opacity-80">Total Aset Likuid (Kas + Bank)</p>
                                         </div>
                                         <button onClick={handleAdvisor} className="bg-white/10 backdrop-blur-md hover:bg-white/20 text-white p-3 rounded-2xl transition border border-white/10 group-hover:scale-105">
                                             <Bot size={24} />
@@ -846,6 +863,11 @@ function App() {
                                     </div>
                                     
                                     <div className="mt-8 flex gap-3">
+                                        {/* TOMBOL BARU: PENJUALAN */}
+                                        <button onClick={() => {setEditData(null); setActiveModal('sales_stock')}} className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-3 rounded-xl font-bold text-sm transition shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2">
+                                            <ShoppingCart size={18}/> Penjualan
+                                        </button>
+                                        
                                         <button onClick={() => {setEditData(null); setActiveModal('income')}} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-3 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2">
                                             <ArrowDownRight size={18}/> Masuk
                                         </button>
@@ -854,7 +876,6 @@ function App() {
                                         </button>
                                     </div>
                                 </div>
-                                {/* Decorative Circles */}
                                 <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4"></div>
                                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/20 rounded-full blur-3xl translate-y-1/3 -translate-x-1/4"></div>
                             </div>
@@ -867,7 +888,7 @@ function App() {
                                         <span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">PEMASUKAN</span>
                                     </div>
                                     <h3 className="text-2xl font-bold text-slate-800">{formatCurrency(dashboardStats.income)}</h3>
-                                    <p className="text-xs text-slate-400 mt-1">Total arus masuk periode ini</p>
+                                    <p className="text-xs text-slate-400 mt-1">Total arus masuk</p>
                                 </div>
                                 <div className="flex-1 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
                                     <div className="flex justify-between items-start mb-4">
@@ -875,7 +896,7 @@ function App() {
                                         <span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">PENGELUARAN</span>
                                     </div>
                                     <h3 className="text-2xl font-bold text-slate-800">{formatCurrency(dashboardStats.expense)}</h3>
-                                    <p className="text-xs text-slate-400 mt-1">Total beban usaha saat ini</p>
+                                    <p className="text-xs text-slate-400 mt-1">Total beban usaha</p>
                                 </div>
                             </div>
                         </div>
@@ -884,7 +905,7 @@ function App() {
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                             {/* Breakdown Card */}
                             <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col justify-center">
-                                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><CreditCard size={20} className="text-indigo-500"/> Rincian Penyimpanan</h3>
+                                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><CreditCard size={20} className="text-indigo-500"/> Posisi Keuangan</h3>
                                 <div className="space-y-4">
                                     <div className="relative p-5 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden group">
                                         <div className="flex justify-between items-center relative z-10">
@@ -892,12 +913,12 @@ function App() {
                                                 <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-indigo-600 shadow-sm"><Banknote size={24}/></div>
                                                 <div>
                                                     <p className="text-sm font-bold text-slate-600">Kas Tunai</p>
-                                                    <p className="text-[10px] text-slate-400 uppercase tracking-wider">Fisik di Laci</p>
+                                                    <p className="text-[10px] text-slate-400 uppercase tracking-wider">Fisik</p>
                                                 </div>
                                             </div>
                                             <div className="text-right">
                                                 <span className="text-lg font-bold text-slate-800 block">{formatCurrency(dashboardStats.cashBalance)}</span>
-                                                <button onClick={() => setActiveModal('adjustCash')} className="text-[10px] text-indigo-600 font-bold hover:underline hover:text-indigo-800 transition">Koreksi Saldo?</button>
+                                                <button onClick={() => setActiveModal('adjustCash')} className="text-[10px] text-indigo-600 font-bold hover:underline hover:text-indigo-800 transition">Koreksi?</button>
                                             </div>
                                         </div>
                                         <div className="absolute right-0 top-0 h-full w-2 bg-indigo-500"></div>
@@ -962,24 +983,27 @@ function App() {
                         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
                             <div>
                                 <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Riwayat Transaksi</h2>
-                                <p className="text-slate-500 mt-2 font-medium">Jejak arus kas masuk dan keluar kerajaan.</p>
+                                <p className="text-slate-500 mt-2 font-medium">Jejak arus kas masuk dan keluar.</p>
                             </div>
-                            <div className="flex gap-3">
+                            <div className="flex gap-2 flex-wrap justify-end">
                                 {/* DUAL IMPORT BUTTONS */}
-                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('transfer'); setActiveModal('import')}} className="px-5 py-3 bg-white text-indigo-600 border border-indigo-100 rounded-2xl hover:bg-indigo-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('transfer'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-indigo-600 border border-indigo-100 rounded-xl hover:bg-indigo-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
                                     <Upload size={16}/> Import Transfer
                                 </button>
-                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('cash'); setActiveModal('import')}} className="px-5 py-3 bg-white text-amber-600 border border-amber-100 rounded-2xl hover:bg-amber-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('cash'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-amber-600 border border-amber-100 rounded-xl hover:bg-amber-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
                                     <Upload size={16}/> Import Tunai
                                 </button>
-                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('income'); setActiveModal('import')}} className="px-5 py-3 bg-white text-emerald-600 border border-emerald-100 rounded-2xl hover:bg-emerald-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
-                                    <Upload size={16}/> Import Masuk
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('sales'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-teal-600 border border-teal-100 rounded-xl hover:bg-teal-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                                    <Upload size={16}/> Import Penjualan
                                 </button>
 
-                                <button onClick={() => {setEditData(null); setActiveModal('income')}} className="px-5 py-3 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
+                                <button onClick={() => {setEditData(null); setActiveModal('sales_stock')}} className="px-4 py-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 shadow-lg shadow-indigo-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
+                                    <ShoppingCart size={18}/> Penjualan
+                                </button>
+                                <button onClick={() => {setEditData(null); setActiveModal('income')}} className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
                                     <ArrowDownRight size={18}/> Pemasukan
                                 </button>
-                                <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="px-5 py-3 bg-rose-600 text-white rounded-2xl hover:bg-rose-700 shadow-lg shadow-rose-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
+                                <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="px-4 py-2.5 bg-rose-600 text-white rounded-xl hover:bg-rose-700 shadow-lg shadow-rose-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
                                     <ArrowUpRight size={18}/> Pengeluaran
                                 </button>
                             </div>
@@ -1070,7 +1094,7 @@ function App() {
                                                         <FileText size={32}/>
                                                     </div>
                                                     <p className="text-slate-500 font-bold">Belum ada transaksi</p>
-                                                    <p className="text-slate-400 text-sm mt-1">Data yang Baginda cari tidak ditemukan pada kategori ini.</p>
+                                                    <p className="text-slate-400 text-sm mt-1">Data tidak ditemukan pada kategori ini.</p>
                                                 </td>
                                             </tr>
                                         )}
@@ -1083,8 +1107,8 @@ function App() {
                                 <div className="p-4 bg-rose-50 border-t border-rose-100 flex justify-end">
                                     <button 
                                         onClick={async () => {
-                                            if (confirm('PERINGATAN KERAS! \nApakah Baginda yakin ingin MENGHAPUS SEMUA DATA TRANSAKSI?\n\nTindakan ini tidak dapat dibatalkan dan akan mengosongkan riwayat keuangan kerajaan.')) {
-                                                const password = prompt("Masukkan kata sandi konfirmasi: 'HAPUS'");
+                                            if (confirm('KONFIRMASI HAPUS DATA\n\nYakin mau hapus SEMUA riwayat transaksi? Data akan hilang selamanya, Tuan.')) {
+                                                const password = prompt("Ketik 'HAPUS' untuk konfirmasi:");
                                                 if (password === 'HAPUS') {
                                                     setIsLoading(true);
                                                     try {
@@ -1092,24 +1116,23 @@ function App() {
                                                         let count = 0;
                                                         for (const t of transactions) {
                                                             if (count >= limit) break;
-                                                            // PERBAIKAN: Delete loop diarahkan ke public path
                                                             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', t.id));
                                                             count++;
                                                         }
-                                                        alert(`Berhasil menghapus ${count} data transaksi.`);
+                                                        alert(`Berhasil menghapus ${count} data.`);
                                                     } catch (e) {
                                                         console.error(e);
                                                         alert("Gagal menghapus sebagian data.");
                                                     }
                                                     setIsLoading(false);
                                                 } else {
-                                                    alert("Kata sandi salah. Pembatalan dibatalkan.");
+                                                    alert("Kode salah. Batal.");
                                                 }
                                             }
                                         }}
                                         className="text-rose-600 hover:text-rose-700 text-xs font-bold flex items-center gap-2 px-4 py-2 hover:bg-rose-100 rounded-lg transition"
                                     >
-                                        <Trash2 size={14}/> Hapus Semua Riwayat (Reset)
+                                        <Trash2 size={14}/> Reset Semua Data
                                     </button>
                                 </div>
                             )}
@@ -1129,8 +1152,8 @@ function App() {
                     <div className="space-y-8 animate-enter">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div>
-                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Gudang Kerajaan</h2>
-                                <p className="text-slate-500 mt-1">Inventaris & Aset Logistik.</p>
+                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Stok Gudang</h2>
+                                <p className="text-slate-500 mt-1">Inventaris & Logistik.</p>
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={() => {setEditData(null); setImportTypeState('products'); setActiveModal('import')}} className="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-bold text-sm shadow-sm transition flex items-center gap-2">
@@ -1234,7 +1257,7 @@ function App() {
                                     <Package size={32}/>
                                 </div>
                                 <h3 className="text-lg font-bold text-slate-600">Gudang Kosong</h3>
-                                <p className="text-slate-400">Tidak ada produk yang cocok dengan pencarian Baginda.</p>
+                                <p className="text-slate-400">Tidak ada produk yang cocok dengan pencarian Tuan.</p>
                             </div>
                         )}
                     </div>
@@ -1245,7 +1268,7 @@ function App() {
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                             <div>
                                 <h2 className="text-3xl font-extrabold text-slate-800">Laporan Keuangan</h2>
-                                <p className="text-slate-500 mt-1">Analisis kinerja keuangan berdasarkan periode.</p>
+                                <p className="text-slate-500 mt-1">Analisis kinerja bisnis berdasarkan periode.</p>
                             </div>
                         </div>
 
@@ -1320,7 +1343,7 @@ function App() {
                                                         </td>
                                                     </tr>
                                                 )) : (
-                                                    <tr><td colSpan="4" className="text-center py-8 text-slate-400">Tidak ada transaksi pada periode ini.</td></tr>
+                                                    <tr><td colSpan="4" className="text-center py-8 text-slate-400">Tidak ada transaksi.</td></tr>
                                                 )}
                                             </tbody>
                                         </table>
@@ -1333,7 +1356,7 @@ function App() {
                                     <FileText size={32} />
                                 </div>
                                 <h3 className="text-lg font-bold text-slate-700">Belum ada periode dipilih</h3>
-                                <p className="text-slate-400 max-w-sm mt-1">Silakan tentukan tanggal mulai dan selesai di atas untuk melihat analisis laporan.</p>
+                                <p className="text-slate-400 max-w-sm mt-1">Tentukan tanggal mulai dan selesai untuk melihat laporan.</p>
                             </div>
                         )}
                     </div>
@@ -1343,7 +1366,7 @@ function App() {
                     <div className="space-y-8 animate-enter">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                             <div>
-                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Kekayaan Kerajaan</h2>
+                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Daftar Aset</h2>
                                 <p className="text-slate-500 mt-1">Manajemen aset fisik dan piutang tertunda.</p>
                             </div>
                         </div>
@@ -1413,7 +1436,7 @@ function App() {
                                                         </td>
                                                     </tr>
                                                 ))}
-                                                {assets.length === 0 && <tr><td colSpan="3" className="text-center py-8 text-slate-400 italic">Belum ada aset terdaftar.</td></tr>}
+                                                {assets.length === 0 && <tr><td colSpan="3" className="text-center py-8 text-slate-400 italic">Belum ada aset.</td></tr>}
                                             </tbody>
                                         </table>
                                     </div>
@@ -1477,8 +1500,8 @@ function App() {
                     <div className="space-y-8 animate-enter">
                         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                             <div>
-                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Misi & Target</h2>
-                                <p className="text-slate-500 mt-1">Sasaran strategis untuk ekspansi kerajaan.</p>
+                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Target Bisnis</h2>
+                                <p className="text-slate-500 mt-1">Sasaran strategis pengembangan usaha.</p>
                             </div>
                             <button onClick={()=>{setEditData(null);setActiveModal('target')}} className="px-5 py-2.5 bg-violet-600 text-white rounded-xl hover:bg-violet-700 shadow-lg shadow-violet-200 font-bold text-sm transition flex items-center gap-2"><Plus size={18}/> Target Baru</button>
                         </div>
@@ -1523,7 +1546,7 @@ function App() {
                                                     ></div>
                                                 </div>
                                                 <p className="text-[10px] text-slate-400 italic mt-2">
-                                                    {t.notes || "Semangat mengejar target, Baginda!"}
+                                                    {t.notes || "Gas terus, Tuan!"}
                                                 </p>
                                             </div>
                                         </div>
@@ -1536,8 +1559,8 @@ function App() {
                                     <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300 shadow-sm">
                                         <Target size={32}/>
                                     </div>
-                                    <h3 className="text-lg font-bold text-slate-600">Belum Ada Misi</h3>
-                                    <p className="text-slate-400 mt-1 max-w-md mx-auto">Tetapkan target penjualan atau keuangan untuk memotivasi kerajaan.</p>
+                                    <h3 className="text-lg font-bold text-slate-600">Belum Ada Target</h3>
+                                    <p className="text-slate-400 mt-1 max-w-md mx-auto">Tetapkan target penjualan untuk memacu pertumbuhan.</p>
                                     <button onClick={()=>{setEditData(null);setActiveModal('target')}} className="mt-4 text-sm font-bold text-violet-600 hover:text-violet-700">Buat Target Baru &rarr;</button>
                                 </div>
                             )}
@@ -1563,13 +1586,14 @@ function App() {
         {/* --- MODALS & FORMS --- */}
         <Modal isOpen={activeModal === 'modal'} onClose={() => setActiveModal(null)} title="Input Modal Usaha"><TransactionForm type="income" subtype="modal" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         <Modal isOpen={activeModal === 'sales'} onClose={() => setActiveModal(null)} title="Input Penjualan"><TransactionForm type="income" subtype="sales" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
+        <Modal isOpen={activeModal === 'sales_stock'} onClose={() => setActiveModal(null)} title="Penjualan Produk"><TransactionForm type="income" subtype="stock_sale" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         
         {/* Modal Koreksi Saldo */}
         <Modal isOpen={activeModal === 'adjustCash'} onClose={() => setActiveModal(null)} title="Koreksi Saldo Kas (Opname)">
             <form onSubmit={handleAdjustCash} className="space-y-5">
                 <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl text-sm text-amber-800">
                     <p className="font-bold flex items-center gap-2 mb-1"><Activity size={16}/> Penyesuaian Otomatis</p>
-                    <p>Masukkan jumlah uang fisik yang sebenarnya ada di laci. Sistem akan mencatat selisihnya secara otomatis.</p>
+                    <p>Masukkan jumlah uang fisik yang sebenarnya ada di laci. Sistem akan catat selisihnya.</p>
                 </div>
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Saldo di Aplikasi</label>
@@ -1581,7 +1605,7 @@ function App() {
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Saldo Fisik Sebenarnya (Rp)</label>
                     <input name="realBalance" type="number" required min="0" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-lg text-slate-800" placeholder="0" />
                 </div>
-                <button className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">Sesuaikan Saldo Sekarang</button>
+                <button className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">Sesuaikan Saldo</button>
             </form>
         </Modal>
 
@@ -1694,10 +1718,22 @@ function App() {
                     <p className="font-bold mb-2 flex items-center gap-2"><FileSpreadsheet size={16}/> Format Kolom Wajib:</p>
                     {importTypeState === 'transactions' ? (
                         <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            <li><b>Tanggal</b> (YYYY-MM-DD)</li>
-                            <li><b>Deskripsi/Sumber</b></li>
-                            <li><b>Jumlah</b></li>
-                            <li><b>Jenis</b> (income/expense) & <b>Kategori</b> (Opsional)</li>
+                            {importContext === 'sales' ? (
+                                <>
+                                    <li><b>Tanggal</b> (YYYY-MM-DD)</li>
+                                    <li><b>Barang</b> (Nama Produk)</li>
+                                    <li><b>Qty</b> (Jumlah Pcs)</li>
+                                    <li><b>Total</b> (Nilai Rupiah)</li>
+                                    <li><b>Channel</b> (Shopee/Tokopedia/dll)</li>
+                                </>
+                            ) : (
+                                <>
+                                    <li><b>Tanggal</b> (YYYY-MM-DD)</li>
+                                    <li><b>Deskripsi/Sumber</b></li>
+                                    <li><b>Jumlah</b></li>
+                                    <li><b>Jenis</b> (income/expense) & <b>Kategori</b> (Opsional)</li>
+                                </>
+                            )}
                         </ul>
                     ) : (
                         <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
@@ -1728,24 +1764,24 @@ function App() {
                         className="hidden" 
                     />
                 </div>
-                <p className="text-xs text-slate-400 text-center">Pastikan format kolom sesuai template agar data masuk dengan sempurna.</p>
+                <p className="text-xs text-slate-400 text-center">Pastikan format kolom sesuai template.</p>
             </div>
         </Modal>
         
         {/* Advisor Modal */}
-        <Modal isOpen={showAdvisor} onClose={() => setShowAdvisor(false)} title="Titah Penasihat Kerajaan">
+        <Modal isOpen={showAdvisor} onClose={() => setShowAdvisor(false)} title="Analisis AI">
             <div className="space-y-6 text-center">
                 <div className="w-24 h-24 bg-gradient-to-tr from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white mx-auto shadow-xl ring-4 ring-indigo-50 animate-bounce">
                     <Bot size={48} />
                 </div>
                 {isAdvisorLoading ? (
-                    <div className="py-4"><Loader2 className="animate-spin mx-auto text-indigo-600" size={32} /><p className="text-slate-400 mt-2 font-medium">Menerawang bola kristal...</p></div>
+                    <div className="py-4"><Loader2 className="animate-spin mx-auto text-indigo-600" size={32} /><p className="text-slate-400 mt-2 font-medium">Lagi mikir...</p></div>
                 ) : (
                     <div className="text-left bg-indigo-50/50 p-6 rounded-3xl border border-indigo-100 text-slate-700 leading-relaxed shadow-sm">
                         {advisorAnalysis.split('\n').map((l,i) => <p key={i} className="mb-2">{l}</p>)}
                     </div>
                 )}
-                <button onClick={() => setShowAdvisor(false)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold tracking-wide">Terima Kasih</button>
+                <button onClick={() => setShowAdvisor(false)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold tracking-wide">Oke, Makasih</button>
             </div>
         </Modal>
     </div>
