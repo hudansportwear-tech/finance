@@ -27,11 +27,6 @@
     <!-- Babel untuk JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Library Eksternal (Excel & PDF) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 
@@ -50,7 +45,7 @@
     </script>
 
     <style>
-        /* Custom Styles & Animations */
+        /* Custom Styles & Animations - DIOPTIMALKAN */
         body { 
             font-family: 'Plus Jakarta Sans', sans-serif; 
             background-color: #f8fafc; 
@@ -61,30 +56,22 @@
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         
         @keyframes fade-in-up { 
-            from { opacity: 0; transform: translateY(15px); } 
+            from { opacity: 0; transform: translateY(10px); } 
             to { opacity: 1; transform: translateY(0); } 
         }
-        .animate-enter { animation: fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        /* Durasi animasi dipercepat biar terasa lebih snappy */
+        .animate-enter { animation: fade-in-up 0.3s ease-out forwards; }
         
+        /* Glass panel disederhanakan untuk performa */
         .glass-panel { 
-            background: rgba(255, 255, 255, 0.85); 
-            backdrop-filter: blur(12px); 
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.98); 
+            border: 1px solid rgba(226, 232, 240, 1);
         }
         
         .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
 
-        /* Table Styling */
-        .table-row-floating {
-            transition: all 0.2s ease;
-        }
         .table-row-floating:hover {
-            transform: scale(1.005);
-            background-color: #fff;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-            z-index: 10;
-            position: relative;
+            background-color: #f8fafc;
         }
     </style>
 </head>
@@ -92,7 +79,7 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
@@ -104,7 +91,7 @@ import {
   Sparkles, Bot, Loader2, MoreHorizontal, ArrowRight, CreditCard, PieChart, Activity
 } from 'lucide-react';
 
-/* --- FIREBASE CONFIGURATION (ADAPTIVE / HYBRID) --- */
+/* --- FIREBASE CONFIGURATION --- */
 const manualConfig = {
     apiKey: "AIzaSyCfEuuRtxv2A8uhIIs7Z4YQr6Me3ifaamc",
     authDomain: "hudan-finance-196fc.firebaseapp.com",
@@ -123,8 +110,20 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'hudan-sportwear-public';
 
-/* --- GEMINI API SETUP --- */
-const apiKey = ""; // <-- ISI API KEY GEMINI DI SINI JIKA MAU AI NYALA, TUAN
+const apiKey = ""; // API Key Gemini
+
+/* --- UTILS: LAZY LOAD SCRIPTS --- */
+const loadScript = (src, globalName) => {
+    return new Promise((resolve, reject) => {
+        if (window[globalName]) return resolve(window[globalName]);
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.onload = () => resolve(window[globalName]);
+        script.onerror = () => reject(new Error(`Gagal load ${src}`));
+        document.body.appendChild(script);
+    });
+};
 
 const callGemini = async (prompt, isJson = false) => {
   if (!apiKey) {
@@ -148,12 +147,11 @@ const callGemini = async (prompt, isJson = false) => {
     return data.candidates?.[0]?.content?.parts?.[0]?.text;
   } catch (error) {
     console.error("Gemini Error:", error);
-    alert("Koneksi ke AI gagal, Tuan. Cek internet atau kuota API.");
+    alert("Koneksi ke AI gagal, Tuan. Cek internet.");
     return null;
   }
 };
 
-/* --- HELPER FUNCTIONS --- */
 const formatCurrency = (amount) => {
   const num = parseFloat(amount) || 0;
   return new Intl.NumberFormat('id-ID', {
@@ -166,9 +164,6 @@ const formatCurrency = (amount) => {
 
 const formatDate = (dateString) => {
   if (!dateString) return '-';
-  if (!isNaN(dateString) && !dateString.toString().includes('-')) {
-       return new Date(Math.round((dateString - 25569)*86400*1000)).toLocaleDateString('id-ID');
-  }
   const d = new Date(dateString);
   if (!isNaN(d.getTime())) {
       return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -185,33 +180,33 @@ const getGreeting = () => {
 };
 
 /* --- UI COMPONENTS --- */
-const SidebarItem = ({ icon: Icon, label, active, onClick }) => (
+// Memoized Components to prevent unnecessary re-renders
+const SidebarItem = React.memo(({ icon: Icon, label, active, onClick }) => (
     <button 
         onClick={onClick}
-        className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all duration-300 group font-semibold text-[13px] tracking-wide mb-1
+        className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-colors duration-200 group font-semibold text-[13px] tracking-wide mb-1
         ${active 
-            ? 'bg-primary text-white shadow-lg shadow-indigo-500/20' 
+            ? 'bg-primary text-white shadow-md shadow-indigo-500/20' 
             : 'text-slate-500 hover:bg-slate-50 hover:text-primary'}`}
     >
-        <Icon size={20} className={`transition-transform duration-300 ${active ? 'scale-110' : 'group-hover:scale-110'}`} />
+        <Icon size={20} className={active ? '' : 'group-hover:scale-105 transition-transform'} />
         <span>{label}</span>
-        {active && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>}
     </button>
-);
+));
 
-const MobileNavItem = ({ icon: Icon, label, active, onClick }) => (
+const MobileNavItem = React.memo(({ icon: Icon, label, active, onClick }) => (
     <button 
         onClick={onClick}
-        className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all duration-300
-        ${active ? 'text-primary bg-indigo-50 scale-105' : 'text-slate-400 hover:text-slate-600'}`}
+        className={`flex flex-col items-center justify-center p-2 rounded-xl transition-colors duration-200
+        ${active ? 'text-primary bg-indigo-50' : 'text-slate-400'}`}
     >
-        <Icon size={22} className={active ? 'mb-1' : 'mb-1'} strokeWidth={active ? 2.5 : 2} />
-        <span className="text-[10px] font-bold">{label}</span>
+        <Icon size={22} strokeWidth={active ? 2.5 : 2} />
+        <span className="text-[10px] font-bold mt-1">{label}</span>
     </button>
-);
+));
 
 const Card = ({ children, className = "", title, subtitle, action }) => (
-    <div className={`bg-white rounded-3xl p-6 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07),0_10px_20px_-2px_rgba(0,0,0,0.04)] border border-slate-100/50 ${className}`}>
+    <div className={`bg-white rounded-3xl p-6 shadow-sm border border-slate-200 ${className}`}>
         {(title || action) && (
             <div className="flex justify-between items-start mb-6">
                 <div>
@@ -229,11 +224,11 @@ const Modal = ({ isOpen, onClose, title, children }) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
-            <div className="relative bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl border border-white/20 animate-enter ring-1 ring-black/5">
-                <div className="flex justify-between items-center p-6 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur z-10">
+            <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose}></div>
+            <div className="relative bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl animate-enter">
+                <div className="flex justify-between items-center p-6 border-b border-slate-100 sticky top-0 bg-white z-10">
                     <h3 className="text-xl font-bold text-slate-800">{title}</h3>
-                    <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition text-slate-400 hover:text-slate-600"><X size={20} /></button>
+                    <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition text-slate-400"><X size={20} /></button>
                 </div>
                 <div className="p-6">
                     {children}
@@ -254,7 +249,6 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
         transferType: 'bank_to_cash', 
         notes: '' 
     });
-    // MODIFIKASI: Default useStock nyala kalau subtype-nya 'stock_sale'
     const [useStock, setUseStock] = useState(subtype === 'stock_sale');
     const [selProd, setSelProd] = useState('');
     const [qty, setQty] = useState(1);
@@ -264,13 +258,12 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
     const handleMagicFill = async () => {
         if (!magicPrompt.trim()) return;
         setIsMagicLoading(true);
-        const systemPrompt = `Extract transaction details from this text: "${magicPrompt}". Context: This is a "${type}" transaction. Return JSON: { 'description': string, 'amount': number, 'category': string, 'paymentMethod': 'cash'|'noncash' }.`;
-        const result = await callGemini(systemPrompt, true);
+        const result = await callGemini(`Extract transaction details from: "${magicPrompt}". Context: "${type}" transaction. Return JSON: { 'description': string, 'amount': number, 'category': string, 'paymentMethod': 'cash'|'noncash' }.`, true);
         if (result) {
             try {
                 const parsed = JSON.parse(result);
                 setForm(prev => ({ ...prev, ...parsed }));
-            } catch (e) { alert("AI gagal memproses, Tuan. Coba manual saja."); }
+            } catch (e) { alert("AI gagal memproses, Tuan."); }
         }
         setIsMagicLoading(false);
     };
@@ -302,15 +295,7 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
         if (type === 'expense' && form.paymentMethod === 'cash' && !initialData) {
             const expenseAmount = parseFloat(form.amount);
             if (expenseAmount > dashboardStats.cashBalance) {
-                const isConfirmed = confirm(
-                    `⚠️ Saldo Kas Tunai Kurang!\n\n` +
-                    `Saldo Kas: ${formatCurrency(dashboardStats.cashBalance)}\n` +
-                    `Pengeluaran: ${formatCurrency(expenseAmount)}\n\n` +
-                    `Sistem akan catat "TARIK TUNAI" otomatis dari Bank untuk menutupi ini.\n\n` +
-                    `Lanjut, Tuan?`
-                );
-
-                if (isConfirmed) {
+                if (confirm(`Saldo Kas Kurang! Buat "Tarik Tunai" otomatis?`)) {
                     autoWithdrawal = {
                         date: form.date,
                         description: `Penarikan Tunai (Otomatis)`,
@@ -319,28 +304,24 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
                         transferType: 'bank_to_cash',
                         category: 'system', 
                         paymentMethod: 'noncash',
-                        notes: `Dana talangan otomatis untuk: ${form.description}`,
                         createdAt: new Date().toISOString()
                     };
-                } else {
-                    return; 
-                }
+                } else return;
             }
         }
         
         onSave(data, initialData?.id, autoWithdrawal, (useStock ? {id: selProd, qty: -qty} : null));
     };
 
-    const inputClass = "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all font-medium text-slate-700 placeholder:text-slate-400";
+    const inputClass = "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all font-medium text-slate-700";
     
     return (
         <form onSubmit={submit} className="space-y-6">
             {!useStock && !initialData && type !== 'transfer' && (
-                <div className="bg-gradient-to-r from-violet-50 to-indigo-50 border border-indigo-100 p-4 rounded-2xl relative overflow-hidden group">
-                      <label className="block text-xs font-bold text-indigo-600 uppercase mb-2 flex items-center gap-1"><Sparkles size={12} /> Isi Cepat pakai AI</label>
+                <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-2xl">
                       <div className="flex gap-2">
-                        <input type="text" className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-400/50 outline-none" placeholder="Contoh: Beli kain 2.5jt" value={magicPrompt} onChange={(e) => setMagicPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleMagicFill())}/>
-                        <button type="button" onClick={handleMagicFill} disabled={isMagicLoading} className="bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">{isMagicLoading ? <Loader2 className="animate-spin" size={18}/> : <Sparkles size={18}/>}</button>
+                        <input type="text" className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-2.5 text-sm outline-none" placeholder="Isi pakai AI: Beli kain 2.5jt" value={magicPrompt} onChange={(e) => setMagicPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleMagicFill())}/>
+                        <button type="button" onClick={handleMagicFill} disabled={isMagicLoading} className="bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700">{isMagicLoading ? <Loader2 className="animate-spin" size={18}/> : <Sparkles size={18}/>}</button>
                       </div>
                 </div>
             )}
@@ -368,7 +349,7 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
             )}
 
             {!useStock && (
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Keterangan</label><input type="text" required className={inputClass} placeholder={type === 'income' ? "Contoh: Penjualan Jersey" : "Contoh: Beli Token Listrik"} value={form.description} onChange={e => setForm({...form, description: e.target.value})} /></div>
+                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Keterangan</label><input type="text" required className={inputClass} placeholder="Contoh: Penjualan Jersey" value={form.description} onChange={e => setForm({...form, description: e.target.value})} /></div>
             )}
 
             <div>
@@ -391,7 +372,7 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
                 <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Arah Transfer</label><select className={inputClass} value={form.transferType} onChange={e => setForm({...form, transferType: e.target.value})}><option value="bank_to_cash">Bank ke Tunai (Tarik)</option><option value="cash_to_bank">Tunai ke Bank (Setor)</option></select></div>
             )}
 
-            <button type="submit" className="w-full bg-primary hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-500/30 transition-all active:scale-[0.98] text-sm tracking-wide">SIMPAN DATA</button>
+            <button type="submit" className="w-full bg-primary hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-500/30 transition-transform active:scale-[0.98]">SIMPAN DATA</button>
         </form>
     );
 };
@@ -401,6 +382,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false); // Global processing state
   
   // Data State
   const [transactions, setTransactions] = useState([]);
@@ -414,12 +396,12 @@ function App() {
   const [editData, setEditData] = useState(null);
   const [prodSearch, setProdSearch] = useState('');
   
-  // AI Advisor State
+  // AI
   const [showAdvisor, setShowAdvisor] = useState(false);
   const [advisorAnalysis, setAdvisorAnalysis] = useState('');
   const [isAdvisorLoading, setIsAdvisorLoading] = useState(false);
 
-  // Pagination & Filter State
+  // Pagination & Filter
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
   const [reportFilter, setReportFilter] = useState({ startDate: '', endDate: '', category: 'all' });
@@ -427,7 +409,7 @@ function App() {
   const [importContext, setImportContext] = useState('all'); 
   const [transTab, setTransTab] = useState('all');
 
-  /* --- AUTH & INIT (STRICT PROTOCOL) --- */
+  /* --- AUTH & INIT --- */
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -438,17 +420,10 @@ function App() {
         }
       } catch (error) {
         console.error("Login gagal:", error);
-        if (firebaseConfig.apiKey.includes("GANTI_DENGAN")) {
-            alert("Tuan, config Firebase belum diisi. Mode offline.");
-        }
       }
     };
     initAuth();
-    
-    const unsubscribe = onAuthStateChanged(auth, (u) => { 
-        setUser(u); 
-        setIsLoading(false); 
-    });
+    const unsubscribe = onAuthStateChanged(auth, (u) => { setUser(u); setIsLoading(false); });
     return () => unsubscribe();
   }, []);
 
@@ -458,29 +433,41 @@ function App() {
     const basePath = ['artifacts', appId, 'public', 'data'];
     
     const subs = [
-        onSnapshot(collection(db, ...basePath, 'transactions'), 
-            s => setTransactions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.date)-new Date(a.date))),
-            err => console.error("Err Trans:", err)
-        ),
-        onSnapshot(collection(db, ...basePath, 'assets'), 
-            s => setAssets(s.docs.map(d => ({id:d.id, ...d.data()}))),
-            err => console.error("Err Assets:", err)
-        ),
-        onSnapshot(collection(db, ...basePath, 'receivables'), 
-            s => setReceivables(s.docs.map(d => ({id:d.id, ...d.data()}))),
-            err => console.error("Err Receive:", err)
-        ),
-        onSnapshot(collection(db, ...basePath, 'targets'), 
-            s => setTargets(s.docs.map(d => ({id:d.id, ...d.data()}))),
-            err => console.error("Err Target:", err)
-        ),
-        onSnapshot(collection(db, ...basePath, 'products'), 
-            s => setProducts(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => a.name.localeCompare(b.name))),
-            err => console.error("Err Prod:", err)
-        )
+        onSnapshot(collection(db, ...basePath, 'transactions'), s => setTransactions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.date)-new Date(a.date)))),
+        onSnapshot(collection(db, ...basePath, 'assets'), s => setAssets(s.docs.map(d => ({id:d.id, ...d.data()})))),
+        onSnapshot(collection(db, ...basePath, 'receivables'), s => setReceivables(s.docs.map(d => ({id:d.id, ...d.data()})))),
+        onSnapshot(collection(db, ...basePath, 'targets'), s => setTargets(s.docs.map(d => ({id:d.id, ...d.data()})))),
+        onSnapshot(collection(db, ...basePath, 'products'), s => setProducts(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => a.name.localeCompare(b.name))))
     ];
     return () => subs.forEach(unsub => unsub());
   }, [user]);
+
+  /* --- OPTIMIZATION (MEMOIZATION) --- */
+  const filteredTransactions = useMemo(() => {
+      return transactions.filter(t => {
+          if (transTab === 'all') return true;
+          if (transTab === 'modal') return t.category === 'modal';
+          if (transTab === 'sales') return t.type === 'income' && t.category !== 'modal';
+          if (transTab === 'expense') return t.type === 'expense';
+          if (transTab === 'transfer') return t.type === 'transfer';
+          return true;
+      });
+  }, [transactions, transTab]);
+
+  const paginatedTransactions = useMemo(() => {
+      return filteredTransactions.slice((currentPage-1)*itemsPerPage, currentPage*itemsPerPage);
+  }, [filteredTransactions, currentPage, itemsPerPage]);
+
+  const dashboardStats = useMemo(() => {
+    let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0;
+    transactions.forEach(t => {
+      const amt = parseFloat(t.amount) || 0;
+      if (t.type === 'income') { income += amt; t.paymentMethod === 'cash' ? cashBalance += amt : nonCashBalance += amt; }
+      else if (t.type === 'expense') { expense += amt; t.paymentMethod === 'cash' ? cashBalance -= amt : nonCashBalance -= amt; }
+      else if (t.type === 'transfer') { if (t.transferType === 'bank_to_cash') { cashBalance += amt; nonCashBalance -= amt; } else { cashBalance -= amt; nonCashBalance += amt; } }
+    });
+    return { income, expense, balance: cashBalance + nonCashBalance, cashBalance, nonCashBalance, totalAssets: assets.reduce((s,a)=>s+(parseFloat(a.value)||0),0), totalReceivables: receivables.filter(r=>r.status==='pending').reduce((s,r)=>s+(parseFloat(r.amount)||0),0) };
+  }, [transactions, assets, receivables]);
 
   /* --- CRUD & LOGIC --- */
   const getCollectionRef = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
@@ -499,9 +486,7 @@ function App() {
   };
   
   const deleteRecord = async (col, id) => { 
-      // CATATAN: Hapus data transaksi tidak otomatis mengembalikan stok barang.
-      // Ini fitur pengaman agar stok tidak kacau jika data lama dihapus.
-      if (!confirm('Yakin hapus data ini, Tuan? Stok barang tidak akan berubah.')) return; 
+      if (!confirm('Yakin hapus data ini, Tuan?')) return; 
       await deleteDoc(getDocRef(col, id)); 
   };
   
@@ -518,283 +503,185 @@ function App() {
       await addRecord('transactions',{date:new Date().toISOString().split('T')[0],description:`Pelunasan: ${r.customerName}`,amount:parseFloat(r.amount),type:'income',category:'other',paymentMethod:'cash',notes:'Otomatis'}); 
   };
 
-  // Koreksi Saldo Otomatis (Opname Kas)
   const handleAdjustCash = async (e) => {
       e.preventDefault();
-      const realBalance = parseFloat(e.target.realBalance.value);
-      const currentBalance = dashboardStats.cashBalance;
-      const diff = realBalance - currentBalance;
-
-      if (diff === 0) {
-          alert("Saldo sudah pas, Tuan.");
-          setActiveModal(null);
-          return;
-      }
-
-      const adjustmentData = {
-          date: new Date().toISOString().split('T')[0],
-          description: 'Koreksi Saldo (Opname)',
-          amount: Math.abs(diff),
-          category: 'modal', 
-          paymentMethod: 'cash',
-          type: diff > 0 ? 'income' : 'expense',
-          notes: `Penyesuaian manual. Saldo lama: ${formatCurrency(currentBalance)}`,
-          createdAt: new Date().toISOString()
-      };
-
-      if (confirm(`Sistem akan buat transaksi otomatis ${formatCurrency(Math.abs(diff))} biar saldo jadi ${formatCurrency(realBalance)}. Gas?`)) {
-          await addRecord('transactions', adjustmentData);
-          alert("Saldo beres!");
+      const real = parseFloat(e.target.realBalance.value);
+      const curr = dashboardStats.cashBalance;
+      const diff = real - curr;
+      if (diff === 0) return setActiveModal(null);
+      if (confirm(`Saldo di aplikasi: ${formatCurrency(curr)}\nSaldo fisik: ${formatCurrency(real)}\n\nBuat transaksi otomatis ${formatCurrency(Math.abs(diff))}?`)) {
+          await addRecord('transactions', { date: new Date().toISOString().split('T')[0], description: 'Opname Kas', amount: Math.abs(diff), category: 'modal', paymentMethod: 'cash', type: diff > 0 ? 'income' : 'expense', notes: `Prev: ${formatCurrency(curr)}`, createdAt: new Date().toISOString() });
       }
   };
-
-  const dashboardStats = useMemo(() => {
-    let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0;
-    transactions.forEach(t => {
-      const amt = parseFloat(t.amount) || 0;
-      if (t.type === 'income') { income += amt; t.paymentMethod === 'cash' ? cashBalance += amt : nonCashBalance += amt; }
-      else if (t.type === 'expense') { expense += amt; t.paymentMethod === 'cash' ? cashBalance -= amt : nonCashBalance -= amt; }
-      else if (t.type === 'transfer') { if (t.transferType === 'bank_to_cash') { cashBalance += amt; nonCashBalance -= amt; } else { cashBalance -= amt; nonCashBalance += amt; } }
-    });
-    return { income, expense, balance: cashBalance + nonCashBalance, cashBalance, nonCashBalance, totalAssets: assets.reduce((s,a)=>s+(parseFloat(a.value)||0),0), totalReceivables: receivables.filter(r=>r.status==='pending').reduce((s,r)=>s+(parseFloat(r.amount)||0),0) };
-  }, [transactions, assets, receivables]);
 
   const handleAdvisor = async () => {
-    if (!apiKey) return alert("API Key Gemini belum diisi, Tuan. Masukkan di kode dulu.");
+    if (!apiKey) return alert("API Key Gemini belum diisi, Tuan.");
     setShowAdvisor(true); setAdvisorAnalysis(''); setIsAdvisorLoading(true);
-    const prompt = `Anda asisten bisnis pribadi yang santai dan jujur untuk 'Tuan'. Data: Masuk ${dashboardStats.income}, Keluar ${dashboardStats.expense}, Kas ${dashboardStats.cashBalance}, Bank ${dashboardStats.nonCashBalance}. Berikan ringkasan singkat dan 3 saran taktis langsung ke poinnya. Jangan pakai bahasa kaku.`;
-    const res = await callGemini(prompt); setAdvisorAnalysis(res || "Maaf Tuan, analisis gagal diambil."); setIsAdvisorLoading(false);
+    const res = await callGemini(`Anda asisten bisnis santai. Data: Masuk ${dashboardStats.income}, Keluar ${dashboardStats.expense}, Kas ${dashboardStats.cashBalance}. Saran taktis 3 poin.`, false);
+    setAdvisorAnalysis(res || "Gagal analisa."); setIsAdvisorLoading(false);
   };
 
-  // Report Data Calculation
+  // Report Calculation
   const reportData = useMemo(() => {
     if (!reportFilter.startDate || !reportFilter.endDate) return null;
     const start = new Date(reportFilter.startDate);
     const end = new Date(reportFilter.endDate);
     end.setHours(23, 59, 59, 999); 
-
-    const filtered = transactions.filter(t => {
-        const tDate = new Date(t.date);
-        return tDate >= start && tDate <= end;
-    });
-
+    const filtered = transactions.filter(t => { const tDate = new Date(t.date); return tDate >= start && tDate <= end; });
     const income = filtered.filter(t => t.type === 'income').reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
     const expense = filtered.filter(t => t.type === 'expense').reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
-    
     return { transactions: filtered, income, expense, balance: income - expense };
   }, [transactions, reportFilter]);
 
-  const exportToExcel = (data, name) => {
-    if (!window.XLSX) return;
-    const wb = window.XLSX.utils.book_new();
-    const ws = window.XLSX.utils.json_to_sheet(data);
-    window.XLSX.utils.book_append_sheet(wb, ws, "Data");
-    window.XLSX.writeFile(wb, `${name}.xlsx`);
+  /* --- EXPORT/IMPORT with LAZY LOAD --- */
+  const exportToExcel = async (data, name) => {
+    setIsProcessing(true);
+    try {
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'XLSX');
+        const wb = window.XLSX.utils.book_new();
+        const ws = window.XLSX.utils.json_to_sheet(data);
+        window.XLSX.utils.book_append_sheet(wb, ws, "Data");
+        window.XLSX.writeFile(wb, `${name}.xlsx`);
+    } catch(e) { alert("Gagal export Excel"); }
+    setIsProcessing(false);
   };
 
-  const exportToPDF = (headers, data, title) => {
-    if (!window.jspdf) return;
+  const exportToPDF = async (headers, data, title) => {
+    setIsProcessing(true);
     try {
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'jspdf');
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js', 'jspdfAutoTable');
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
-        
-        // Cek plugin autotable
-        if (doc.autoTable) {
-            doc.text(title, 14, 20);
-            doc.autoTable({ head: [headers], body: data, startY: 30, theme: 'grid' });
-            doc.save(`${title}.pdf`);
-        } else {
-            alert("Plugin PDF belum siap total, coba refresh dan tunggu sebentar.");
-        }
-    } catch(e) {
-        console.error(e);
-        alert("Gagal bikin PDF, Tuan.");
-    }
+        doc.text(title, 14, 20);
+        doc.autoTable({ head: [headers], body: data, startY: 30, theme: 'grid' });
+        doc.save(`${title}.pdf`);
+    } catch(e) { alert("Gagal export PDF"); }
+    setIsProcessing(false);
   };
 
-  /* --- IMPORT LOGIC --- */
-  const downloadTemplate = () => {
-    let data = [];
-    let fileName = "Template_Import";
-
-    if (importTypeState === 'transactions') {
-        if (importContext === 'sales') {
-             data = [{ "No": 1, "Tanggal": "2024-01-01", "Barang": "Jersey Hudan V1", "Qty": 2, "Total": 150000, "Channel": "Shopee", "Catatan": "Lunas" }];
-             fileName = "Template_Penjualan";
+  const downloadTemplate = async () => {
+    setIsProcessing(true);
+    try {
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'XLSX');
+        let data = [], fileName = "Template";
+        if (importTypeState === 'transactions') {
+            if (importContext === 'sales') {
+                 data = [{ "No": 1, "Tanggal": "2024-01-01", "Barang": "Contoh Barang", "Qty": 1, "Total": 100000, "Channel": "Shopee" }];
+                 fileName = "Template_Penjualan";
+            } else {
+                 data = [{ "Tanggal": "2024-01-01", "Deskripsi": "Keterangan", "Jumlah": 100000, "Kategori": "Operasional" }];
+                 fileName = "Template_Transaksi";
+            }
         } else {
-             data = [{ "No": 1, "Tanggal": "2024-01-01", "Item": "Keterangan Transaksi", "Jumlah": 100000, "Kategori": "Operasional", "Keterangan": "Catatan tambahan" }];
-             fileName = "Template_Transaksi";
+            data = [{ "SKU": "A01", "Nama": "Produk A", "Kategori": "Umum", "Harga_Beli": 5000, "Harga_Jual": 10000, "Stok": 10 }];
+            fileName = "Template_Stok";
         }
-    } else {
-        data = [{ "SKU": "JRS-001", "Nama": "Jersey Polos M", "Kategori": "Jersey", "Harga_Beli": 50000, "Harga_Jual": 75000, "Stok": 50, "Supplier": "Vendor A" }];
-        fileName = "Template_Produk_Gudang";
-    }
-
-    const wb = window.XLSX.utils.book_new();
-    const ws = window.XLSX.utils.json_to_sheet(data);
-    window.XLSX.utils.book_append_sheet(wb, ws, "Template");
-    window.XLSX.writeFile(wb, `${fileName}.xlsx`);
+        const wb = window.XLSX.utils.book_new();
+        window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(data), "Template");
+        window.XLSX.writeFile(wb, `${fileName}.xlsx`);
+    } catch(e) { alert("Gagal download template"); }
+    setIsProcessing(false);
   };
 
   const handleFileImport = async (e) => {
       const type = importTypeState;
       const file = e.target.files[0];
-      if (!file) return;
-      if (!user) return alert("Tunggu login dulu, Tuan.");
-
-      const isNonTunaiFile = file.name.toLowerCase().includes('non-tunai') || file.name.toLowerCase().includes('non tunai');
-      const isTunaiFile = file.name.toLowerCase().includes('tunai') && !isNonTunaiFile;
-
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-          try {
-              const data = new Uint8Array(evt.target.result);
-              const workbook = window.XLSX.read(data, { type: 'array' });
-              const sheetName = workbook.SheetNames[0];
-              const jsonData = window.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {raw: false});
-
-              if (jsonData.length === 0) return alert("File kosong, Tuan.");
+      if (!file || !user) return;
+      
+      setIsProcessing(true);
+      try {
+          await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'XLSX');
+          const reader = new FileReader();
+          reader.onload = async (evt) => {
+              const workbook = window.XLSX.read(evt.target.result, { type: 'array' });
+              const jsonData = window.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {raw: false});
               
-              const firstRow = jsonData[0];
-              const keys = Object.keys(firstRow);
-              const keyMap = {
-                  tanggal: keys.find(k=>k.toLowerCase().includes('tgl') || k.toLowerCase().includes('date') || k.toLowerCase() === 'tanggal'),
-                  item: keys.find(k=>k.toLowerCase().includes('item') || k.toLowerCase().includes('deskripsi') || k.toLowerCase().includes('uraian') || k.toLowerCase().includes('barang')),
-                  jumlah: keys.find(k=>k.toLowerCase().includes('jumlah') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('nominal') || k.toLowerCase().includes('total'))
-              };
-              
-              let methodLabel = "Otomatis";
-              if (importContext === 'transfer') methodLabel = "TRANSFER (Bank)";
-              else if (importContext === 'cash') methodLabel = "TUNAI (Kas)";
-              else if (importContext === 'sales') methodLabel = "PENJUALAN";
+              if(jsonData.length === 0) { setIsProcessing(false); return alert("File kosong"); }
+              if(!confirm(`Import ${jsonData.length} baris data?`)) { setIsProcessing(false); return; }
 
-              const diagMsg = `CEK DATA:\n` +
-                              `Metode: ${methodLabel}\n` +
-                              `File: ${file.name}\n` +
-                              `Sample Baris 1: ${firstRow[keyMap.item] || '?'}\n\n` +
-                              `Data sudah benar, Tuan?`;
-              if (!confirm(diagMsg)) { e.target.value = null; return; }
-
-              setIsLoading(true);
               let count = 0;
-              for (const row of jsonData) {
-                  let docData = null;
-                  const getVal = (key) => {
-                      if (!key) return null;
-                      const foundKey = Object.keys(row).find(k => k.toLowerCase().trim() === key.toLowerCase());
-                      return foundKey ? row[foundKey] : null;
-                  };
-
-                  if (type === 'transactions') {
-                      let finalDate = new Date().toISOString().split('T')[0];
-                      const tDate = getVal('tanggal') || getVal('date');
+              // Batch processing to prevent blocking UI
+              const processBatch = async (batch) => {
+                  const promises = batch.map(async row => {
+                      // Simple mapping logic
+                      const keys = Object.keys(row);
+                      const getVal = (k) => row[keys.find(key => key.toLowerCase().includes(k))];
                       
-                      if (tDate) {
-                          let parsedDate = null;
-                          const dateStr = String(tDate).trim();
+                      let docData = null;
+                      if (type === 'transactions') {
+                          // Simplified Logic for speed
+                          let amt = parseFloat(String(getVal('jumlah')||getVal('total')||0).replace(/[^0-9.-]/g,'')) || 0;
+                          let desc = getVal('deskripsi') || getVal('item') || 'Imported';
+                          let cat = (getVal('kategori') || getVal('channel') || 'umum').toLowerCase();
                           
-                          if (dateStr.match(/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}$/)) {
-                              const parts = dateStr.split(/[\/-]/);
-                              parsedDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-                          } else {
-                              parsedDate = new Date(dateStr);
+                          if(importContext === 'sales') {
+                              desc = `Jual: ${getVal('barang') || 'Item'} (${getVal('qty')||1}pcs)`;
+                              cat = cat || 'shopee';
                           }
-
-                          if (!isNaN(parsedDate.getTime())) {
-                              finalDate = parsedDate.toISOString().split('T')[0];
-                          }
-                      }
-
-                      let description = getVal('item') || getVal('sumber') || getVal('deskripsi') || 'Imported';
-                      
-                      // Handling khusus Import Penjualan
-                      if (importContext === 'sales') {
-                          const barang = getVal('barang') || getVal('nama barang') || 'Barang';
-                          const qty = getVal('qty') || getVal('jumlah barang') || 1;
-                          description = `Penjualan: ${barang} (${qty} pcs)`;
-                      }
-
-                      const descLower = String(description).toLowerCase();
-                      
-                      let rawType = 'expense'; 
-                      let paymentMethod = 'cash'; 
-                      let transferType = null;
-                      let category = (getVal('kategori') || getVal('channel') || 'umum').toLowerCase();
-
-                      if (importContext === 'transfer') {
-                          paymentMethod = 'noncash';
-                      } else if (importContext === 'cash') {
-                          paymentMethod = 'cash';
-                      } else if (importContext === 'income' || importContext === 'sales') {
-                          rawType = 'income';
-                          paymentMethod = 'noncash'; 
-                          if (isTunaiFile) paymentMethod = 'cash';
-                          if (importContext === 'sales' && !getVal('kategori') && !getVal('channel')) category = 'shopee'; // Default sales to Shopee if unknown
+                          
+                          docData = {
+                              date: new Date(getVal('tanggal') || Date.now()).toISOString().split('T')[0],
+                              description: desc,
+                              amount: Math.abs(amt),
+                              type: (importContext === 'income' || importContext === 'sales') ? 'income' : 'expense',
+                              category: cat,
+                              paymentMethod: (importContext === 'transfer') ? 'noncash' : 'cash',
+                              transferType: null,
+                              createdAt: new Date().toISOString()
+                          };
                       } else {
-                          if (isNonTunaiFile) paymentMethod = 'noncash';
-                          else if (isTunaiFile) paymentMethod = 'cash';
+                          docData = {
+                              sku: getVal('sku') || '',
+                              name: getVal('nama') || 'Produk',
+                              category: getVal('kategori') || 'Umum',
+                              price: parseFloat(getVal('jual') || 0),
+                              cost: parseFloat(getVal('beli') || 0),
+                              stock: parseInt(getVal('stok') || 0),
+                              createdAt: new Date().toISOString()
+                          };
                       }
+                      
+                      if(docData.amount !== 0) {
+                          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', type), docData);
+                          count++;
+                      }
+                  });
+                  await Promise.all(promises);
+              };
 
-                      if (descLower.includes('kas tunai') || descLower.includes('tarik tunai')) {
-                          rawType = 'transfer';
-                          transferType = 'bank_to_cash'; 
-                          paymentMethod = 'noncash'; 
-                      } 
-                      else if (category === 'pemasukan' || getVal('jumlah') < 0) {
-                          // Logic tambahan jika needed
-                      }
-
-                      let rawAmount = getVal('jumlah') || getVal('total') || 0;
-                      if (typeof rawAmount === 'string') {
-                          rawAmount = rawAmount.replace(/[^0-9,-]/g, ''); 
-                      }
-
-                      docData = {
-                          date: finalDate,
-                          description: description,
-                          amount: Math.abs(parseFloat(rawAmount) || 0), 
-                          type: rawType,
-                          category: category,
-                          paymentMethod: paymentMethod,
-                          transferType: transferType,
-                          notes: getVal('keterangan') || getVal('catatan') || '',
-                          createdAt: new Date().toISOString()
-                      };
-                  } else {
-                      docData = {
-                          sku: getVal('sku') || '',
-                          name: getVal('nama') || 'Produk Import',
-                          category: getVal('kategori') || 'Umum',
-                          price: parseFloat(getVal('harga_jual') || 0),
-                          cost: parseFloat(getVal('harga_beli') || 0),
-                          stock: parseInt(getVal('stok') || 0),
-                          createdAt: new Date().toISOString()
-                      };
-                  }
-                  
-                  if (docData && user.uid && docData.amount !== 0) { 
-                      try {
-                          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', type), docData); 
-                          count++; 
-                      } catch (err) {
-                          console.error("Gagal simpan baris:", err);
-                      }
-                  }
+              // Process in chunks of 50
+              for (let i = 0; i < jsonData.length; i += 50) {
+                  await processBatch(jsonData.slice(i, i + 50));
               }
-              setIsLoading(false);
+              
               alert(`Sukses import ${count} data.`);
               setActiveModal(null);
-              e.target.value = null;
-          } catch (err) { console.error(err); setIsLoading(false); alert("Gagal proses file: " + err.message); }
-      };
-      reader.readAsArrayBuffer(file);
+              setIsProcessing(false);
+          };
+          reader.readAsArrayBuffer(file);
+      } catch(e) {
+          console.error(e);
+          alert("Gagal proses file");
+          setIsProcessing(false);
+      }
   };
 
-  /* --- RENDER FUNCTIONS --- */
-  if (isLoading) return <div className="flex h-screen items-center justify-center bg-slate-50"><div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div></div>;
+  /* --- RENDER --- */
+  if (isLoading) return <div className="flex h-screen items-center justify-center bg-slate-50"><div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div></div>;
 
   return (
     <div className="flex h-screen bg-[#f8fafc] text-slate-800 overflow-hidden font-sans">
+        {/* Global Loading Overlay for heavy tasks */}
+        {isProcessing && (
+            <div className="fixed inset-0 z-[60] bg-white/50 backdrop-blur-sm flex items-center justify-center">
+                <div className="bg-white p-4 rounded-2xl shadow-xl flex items-center gap-3">
+                    <Loader2 className="animate-spin text-indigo-600" size={24}/>
+                    <span className="font-bold text-slate-700">Sedang memproses, Tuan...</span>
+                </div>
+            </div>
+        )}
+
         {/* SIDEBAR DESKTOP */}
         <aside className="hidden md:flex flex-col w-72 bg-white border-r border-slate-100 h-full relative z-20">
             <div className="p-8 pb-6">
@@ -829,10 +716,10 @@ function App() {
             </div>
         </aside>
 
-        {/* MAIN CONTENT Area */}
+        {/* MAIN CONTENT */}
         <main className="flex-1 h-full overflow-y-auto relative scroll-smooth bg-[#f8fafc]">
             {/* Mobile Header */}
-            <header className="md:hidden bg-white/80 backdrop-blur-md sticky top-0 z-30 border-b border-slate-200 px-5 py-4 flex justify-between items-center shadow-sm">
+            <header className="md:hidden bg-white/90 backdrop-blur-md sticky top-0 z-30 border-b border-slate-200 px-5 py-4 flex justify-between items-center shadow-sm">
                 <div className="flex items-center gap-2.5 font-bold text-slate-800">
                     <div className="p-2 bg-indigo-600 rounded-lg text-white"><TrendingUp size={18}/></div>
                     <span>Hudan Sport</span>
@@ -843,31 +730,28 @@ function App() {
             <div className="p-5 md:p-10 max-w-7xl mx-auto min-h-full pb-32">
                 {activeTab === 'dashboard' && (
                     <div className="space-y-8 animate-enter">
-                        {/* HERO SECTION */}
+                        {/* HERO */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div className="lg:col-span-2 bg-gradient-to-br from-indigo-900 via-violet-900 to-slate-900 rounded-[2.5rem] p-8 md:p-10 text-white shadow-2xl relative overflow-hidden ring-1 ring-white/10 group">
+                            <div className="lg:col-span-2 bg-gradient-to-br from-indigo-900 via-violet-900 to-slate-900 rounded-[2.5rem] p-8 md:p-10 text-white shadow-2xl relative overflow-hidden group">
                                 <div className="relative z-10 h-full flex flex-col justify-between">
                                     <div className="flex justify-between items-start">
                                         <div>
                                             <p className="text-indigo-200 text-sm font-medium mb-1 flex items-center gap-2">
-                                                <Sparkles size={14} className="text-yellow-400 animate-pulse"/> Halo, {getGreeting()} Tuan
+                                                <Sparkles size={14} className="text-yellow-400"/> Halo, {getGreeting()} Tuan
                                             </p>
                                             <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-2">
                                                 {formatCurrency(dashboardStats.balance).replace('Rp', 'Rp ')}
                                             </h2>
-                                            <p className="text-slate-300 text-sm font-light opacity-80">Total Aset Likuid (Kas + Bank)</p>
+                                            <p className="text-slate-300 text-sm font-light opacity-80">Total Aset Likuid</p>
                                         </div>
-                                        <button onClick={handleAdvisor} className="bg-white/10 backdrop-blur-md hover:bg-white/20 text-white p-3 rounded-2xl transition border border-white/10 group-hover:scale-105">
+                                        <button onClick={handleAdvisor} className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-2xl transition border border-white/10">
                                             <Bot size={24} />
                                         </button>
                                     </div>
-                                    
                                     <div className="mt-8 flex gap-3">
-                                        {/* TOMBOL BARU: PENJUALAN */}
                                         <button onClick={() => {setEditData(null); setActiveModal('sales_stock')}} className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-3 rounded-xl font-bold text-sm transition shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2">
-                                            <ShoppingCart size={18}/> Penjualan
+                                            <ShoppingCart size={18}/> Jual Barang
                                         </button>
-                                        
                                         <button onClick={() => {setEditData(null); setActiveModal('income')}} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-3 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2">
                                             <ArrowDownRight size={18}/> Masuk
                                         </button>
@@ -876,38 +760,33 @@ function App() {
                                         </button>
                                     </div>
                                 </div>
-                                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4"></div>
-                                <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/20 rounded-full blur-3xl translate-y-1/3 -translate-x-1/4"></div>
                             </div>
 
-                            {/* MINI STATS COLUMN */}
+                            {/* MINI STATS */}
                             <div className="space-y-6 flex flex-col">
-                                <div className="flex-1 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
+                                <div className="flex-1 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
                                     <div className="flex justify-between items-start mb-4">
                                         <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl"><ArrowDownRight size={24}/></div>
                                         <span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">PEMASUKAN</span>
                                     </div>
                                     <h3 className="text-2xl font-bold text-slate-800">{formatCurrency(dashboardStats.income)}</h3>
-                                    <p className="text-xs text-slate-400 mt-1">Total arus masuk</p>
                                 </div>
-                                <div className="flex-1 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
+                                <div className="flex-1 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
                                     <div className="flex justify-between items-start mb-4">
                                         <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl"><ArrowUpRight size={24}/></div>
                                         <span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">PENGELUARAN</span>
                                     </div>
                                     <h3 className="text-2xl font-bold text-slate-800">{formatCurrency(dashboardStats.expense)}</h3>
-                                    <p className="text-xs text-slate-400 mt-1">Total beban usaha</p>
                                 </div>
                             </div>
                         </div>
 
                         {/* SECOND ROW */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                            {/* Breakdown Card */}
                             <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col justify-center">
                                 <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><CreditCard size={20} className="text-indigo-500"/> Posisi Keuangan</h3>
                                 <div className="space-y-4">
-                                    <div className="relative p-5 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden group">
+                                    <div className="relative p-5 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
                                         <div className="flex justify-between items-center relative z-10">
                                             <div className="flex items-center gap-4">
                                                 <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-indigo-600 shadow-sm"><Banknote size={24}/></div>
@@ -921,9 +800,7 @@ function App() {
                                                 <button onClick={() => setActiveModal('adjustCash')} className="text-[10px] text-indigo-600 font-bold hover:underline hover:text-indigo-800 transition">Koreksi?</button>
                                             </div>
                                         </div>
-                                        <div className="absolute right-0 top-0 h-full w-2 bg-indigo-500"></div>
                                     </div>
-                                    
                                     <div className="relative p-5 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
                                         <div className="flex justify-between items-center relative z-10">
                                             <div className="flex items-center gap-4">
@@ -935,12 +812,10 @@ function App() {
                                             </div>
                                             <span className="text-lg font-bold text-slate-800">{formatCurrency(dashboardStats.nonCashBalance)}</span>
                                         </div>
-                                        <div className="absolute right-0 top-0 h-full w-2 bg-purple-500"></div>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Recent Activity Mini */}
                             <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col">
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Activity size={20} className="text-orange-500"/> Aktivitas Terkini</h3>
@@ -968,7 +843,6 @@ function App() {
                                         </div>
                                     ) : (
                                         <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                                            <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-2"><FileText size={20}/></div>
                                             <p className="text-sm">Belum ada transaksi.</p>
                                         </div>
                                     )}
@@ -978,6 +852,7 @@ function App() {
                     </div>
                 )}
 
+                {/* --- TRANSAKSI --- */}
                 {activeTab === 'transactions' && (
                     <div className="space-y-8 animate-enter">
                         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -986,30 +861,16 @@ function App() {
                                 <p className="text-slate-500 mt-2 font-medium">Jejak arus kas masuk dan keluar.</p>
                             </div>
                             <div className="flex gap-2 flex-wrap justify-end">
-                                {/* DUAL IMPORT BUTTONS */}
-                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('transfer'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-indigo-600 border border-indigo-100 rounded-xl hover:bg-indigo-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
-                                    <Upload size={16}/> Import Transfer
-                                </button>
-                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('cash'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-amber-600 border border-amber-100 rounded-xl hover:bg-amber-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
-                                    <Upload size={16}/> Import Tunai
-                                </button>
-                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('sales'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-teal-600 border border-teal-100 rounded-xl hover:bg-teal-50 font-bold text-xs transition-all active:scale-95 flex items-center gap-2 shadow-sm">
-                                    <Upload size={16}/> Import Penjualan
-                                </button>
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('transfer'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-indigo-600 border border-indigo-100 rounded-xl hover:bg-indigo-50 font-bold text-xs flex items-center gap-2 shadow-sm"><Upload size={16}/> Import Transfer</button>
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('cash'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-amber-600 border border-amber-100 rounded-xl hover:bg-amber-50 font-bold text-xs flex items-center gap-2 shadow-sm"><Upload size={16}/> Import Tunai</button>
+                                <button onClick={() => {setEditData(null); setImportTypeState('transactions'); setImportContext('sales'); setActiveModal('import')}} className="px-4 py-2.5 bg-white text-teal-600 border border-teal-100 rounded-xl hover:bg-teal-50 font-bold text-xs flex items-center gap-2 shadow-sm"><Upload size={16}/> Import Penjualan</button>
 
-                                <button onClick={() => {setEditData(null); setActiveModal('sales_stock')}} className="px-4 py-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 shadow-lg shadow-indigo-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
-                                    <ShoppingCart size={18}/> Penjualan
-                                </button>
-                                <button onClick={() => {setEditData(null); setActiveModal('income')}} className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
-                                    <ArrowDownRight size={18}/> Pemasukan
-                                </button>
-                                <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="px-4 py-2.5 bg-rose-600 text-white rounded-xl hover:bg-rose-700 shadow-lg shadow-rose-200 font-bold text-xs transition-all active:scale-95 flex items-center gap-2">
-                                    <ArrowUpRight size={18}/> Pengeluaran
-                                </button>
+                                <button onClick={() => {setEditData(null); setActiveModal('sales_stock')}} className="px-4 py-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 shadow-lg font-bold text-xs flex items-center gap-2"><ShoppingCart size={18}/> Penjualan</button>
+                                <button onClick={() => {setEditData(null); setActiveModal('income')}} className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 shadow-lg font-bold text-xs flex items-center gap-2"><ArrowDownRight size={18}/> Masuk</button>
+                                <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="px-4 py-2.5 bg-rose-600 text-white rounded-xl hover:bg-rose-700 shadow-lg font-bold text-xs flex items-center gap-2"><ArrowUpRight size={18}/> Keluar</button>
                             </div>
                         </div>
 
-                        {/* Modern Tab Filter */}
                         <div className="flex flex-wrap gap-3 pb-2">
                             {[
                                 {id: 'all', label: 'Semua', icon: LayoutDashboard},
@@ -1018,22 +879,13 @@ function App() {
                                 {id: 'modal', label: 'Modal', icon: Wallet},
                                 {id: 'transfer', label: 'Transfer', icon: ArrowRight}
                             ].map(tab => (
-                                <button 
-                                    key={tab.id} 
-                                    onClick={() => { setTransTab(tab.id); setCurrentPage(1); }} 
-                                    className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 border ${
-                                        transTab === tab.id 
-                                        ? 'bg-slate-800 text-white border-slate-800 shadow-lg shadow-slate-200 scale-105' 
-                                        : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
-                                    }`}
-                                >
-                                    <tab.icon size={16} className={transTab === tab.id ? 'text-white' : 'text-slate-400'}/>
-                                    {tab.label}
+                                <button key={tab.id} onClick={() => { setTransTab(tab.id); setCurrentPage(1); }} className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 border ${transTab === tab.id ? 'bg-slate-800 text-white border-slate-800 shadow-lg' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                                    <tab.icon size={16} className={transTab === tab.id ? 'text-white' : 'text-slate-400'}/> {tab.label}
                                 </button>
                             ))}
                         </div>
 
-                        <Card className="overflow-hidden !p-0 border border-slate-100 shadow-xl bg-white/80 backdrop-blur-sm">
+                        <Card className="overflow-hidden !p-0 border border-slate-100 shadow-xl">
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm text-left border-collapse">
                                     <thead className="bg-slate-50/80 text-xs uppercase text-slate-500 font-extrabold tracking-wider border-b border-slate-100">
@@ -1045,7 +897,7 @@ function App() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50 bg-white">
-                                        {transactions.filter(t => transTab==='all' || (transTab==='modal' && t.category==='modal') || (transTab==='sales' && t.type==='income' && t.category!=='modal') || (transTab==='expense' && t.type==='expense') || (transTab==='transfer' && t.type==='transfer')).slice((currentPage-1)*itemsPerPage, currentPage*itemsPerPage).map((t) => (
+                                        {paginatedTransactions.map((t) => (
                                             <tr key={t.id} className="group hover:bg-slate-50 transition-colors">
                                                 <td className="px-8 py-5">
                                                     <div className="flex items-center gap-4">
@@ -1062,14 +914,7 @@ function App() {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-5">
-                                                    <span className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide inline-flex items-center gap-1.5 ${
-                                                        t.category === 'shopee' ? 'bg-orange-50 text-orange-600 border border-orange-100' :
-                                                        t.category === 'produksi' ? 'bg-purple-50 text-purple-600 border border-purple-100' :
-                                                        t.category === 'operasional' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
-                                                        'bg-slate-50 text-slate-600 border border-slate-100'
-                                                    }`}>
-                                                        {t.category || 'Umum'}
-                                                    </span>
+                                                    <span className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-slate-50 text-slate-600 border border-slate-100">{t.category || 'Umum'}</span>
                                                 </td>
                                                 <td className="px-6 py-5">
                                                     <div className={`font-bold text-lg ${t.type === 'income' ? 'text-emerald-600' : t.type === 'expense' ? 'text-rose-600' : 'text-slate-700'}`}>
@@ -1081,23 +926,12 @@ function App() {
                                                 </td>
                                                 <td className="px-6 py-5 text-right">
                                                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <button onClick={() => {setEditData(t); setActiveModal(t.type === 'income' ? (t.category === 'modal' ? 'modal' : 'sales') : t.type)}} className="p-2.5 bg-white border border-slate-200 hover:border-indigo-300 hover:text-indigo-600 text-slate-400 rounded-xl shadow-sm transition"><Edit2 size={16}/></button>
-                                                        <button onClick={() => deleteRecord('transactions', t.id)} className="p-2.5 bg-white border border-slate-200 hover:border-rose-300 hover:text-rose-600 text-slate-400 rounded-xl shadow-sm transition"><Trash2 size={16}/></button>
+                                                        <button onClick={() => {setEditData(t); setActiveModal(t.type === 'income' ? (t.category === 'modal' ? 'modal' : 'sales') : t.type)}} className="p-2 bg-slate-50 hover:bg-slate-100 rounded-lg"><Edit2 size={16} className="text-slate-400"/></button>
+                                                        <button onClick={() => deleteRecord('transactions', t.id)} className="p-2 bg-slate-50 hover:bg-slate-100 rounded-lg"><Trash2 size={16} className="text-rose-400"/></button>
                                                     </div>
                                                 </td>
                                             </tr>
                                         ))}
-                                        {transactions.filter(t => transTab==='all' || (transTab==='modal' && t.category==='modal') || (transTab==='sales' && t.type==='income' && t.category!=='modal') || (transTab==='expense' && t.type==='expense') || (transTab==='transfer' && t.type==='transfer')).length === 0 && (
-                                            <tr>
-                                                <td colSpan="4" className="py-20 text-center">
-                                                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
-                                                        <FileText size={32}/>
-                                                    </div>
-                                                    <p className="text-slate-500 font-bold">Belum ada transaksi</p>
-                                                    <p className="text-slate-400 text-sm mt-1">Data tidak ditemukan pada kategori ini.</p>
-                                                </td>
-                                            </tr>
-                                        )}
                                     </tbody>
                                 </table>
                             </div>
@@ -1105,43 +939,15 @@ function App() {
                             {/* Tombol Hapus Semua Data */}
                             {transactions.length > 0 && transTab === 'all' && (
                                 <div className="p-4 bg-rose-50 border-t border-rose-100 flex justify-end">
-                                    <button 
-                                        onClick={async () => {
-                                            if (confirm('KONFIRMASI HAPUS DATA\n\nYakin mau hapus SEMUA riwayat transaksi? Data akan hilang selamanya, Tuan.')) {
-                                                const password = prompt("Ketik 'HAPUS' untuk konfirmasi:");
-                                                if (password === 'HAPUS') {
-                                                    setIsLoading(true);
-                                                    try {
-                                                        const limit = 500; 
-                                                        let count = 0;
-                                                        for (const t of transactions) {
-                                                            if (count >= limit) break;
-                                                            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', t.id));
-                                                            count++;
-                                                        }
-                                                        alert(`Berhasil menghapus ${count} data.`);
-                                                    } catch (e) {
-                                                        console.error(e);
-                                                        alert("Gagal menghapus sebagian data.");
-                                                    }
-                                                    setIsLoading(false);
-                                                } else {
-                                                    alert("Kode salah. Batal.");
-                                                }
-                                            }
-                                        }}
-                                        className="text-rose-600 hover:text-rose-700 text-xs font-bold flex items-center gap-2 px-4 py-2 hover:bg-rose-100 rounded-lg transition"
-                                    >
-                                        <Trash2 size={14}/> Reset Semua Data
-                                    </button>
+                                    <button onClick={async () => { if (confirm('HAPUS SEMUA DATA?')) { const password = prompt("Ketik 'HAPUS':"); if (password === 'HAPUS') { try { const limit = 500; let count = 0; for (const t of transactions) { if (count >= limit) break; await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', t.id)); count++; } alert(`Terhapus: ${count}`); } catch (e) { alert("Gagal"); } } } }} className="text-rose-600 text-xs font-bold flex items-center gap-2 px-4 py-2 hover:bg-rose-100 rounded-lg transition"><Trash2 size={14}/> Reset Data</button>
                                 </div>
                             )}
 
                             {/* Pagination */}
                             <div className="p-5 border-t border-slate-100 flex justify-between items-center bg-slate-50/50">
-                                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 text-sm font-bold text-slate-600 transition shadow-sm"><ChevronLeft size={16}/> Sebelumnya</button>
-                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider bg-white px-3 py-1 rounded-lg border border-slate-100 shadow-sm">Halaman {currentPage}</span>
-                                <button onClick={() => setCurrentPage(p => p + 1)} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-sm font-bold text-slate-600 transition shadow-sm">Berikutnya <ChevronRight size={16}/></button>
+                                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 text-sm font-bold text-slate-600"><ChevronLeft size={16}/> Prev</button>
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider bg-white px-3 py-1 rounded-lg border border-slate-100 shadow-sm">Page {currentPage}</span>
+                                <button onClick={() => setCurrentPage(p => p + 1)} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-sm font-bold text-slate-600">Next <ChevronRight size={16}/></button>
                             </div>
                         </Card>
                     </div>
@@ -1156,207 +962,94 @@ function App() {
                                 <p className="text-slate-500 mt-1">Inventaris & Logistik.</p>
                             </div>
                             <div className="flex gap-2">
-                                <button onClick={() => {setEditData(null); setImportTypeState('products'); setActiveModal('import')}} className="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-bold text-sm shadow-sm transition flex items-center gap-2">
-                                    <Upload size={18}/> Import
-                                </button>
-                                <button onClick={() => {setEditData(null); setActiveModal('product')}} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 font-bold text-sm transition flex items-center gap-2">
-                                    <Plus size={18}/> Produk Baru
-                                </button>
+                                <button onClick={() => {setEditData(null); setImportTypeState('products'); setActiveModal('import')}} className="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-bold text-sm shadow-sm flex items-center gap-2"><Upload size={18}/> Import</button>
+                                <button onClick={() => {setEditData(null); setActiveModal('product')}} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 shadow-lg font-bold text-sm flex items-center gap-2"><Plus size={18}/> Produk Baru</button>
                             </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4 relative overflow-hidden group">
+                            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl"><Package size={24}/></div>
-                                <div>
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total SKU</p>
-                                    <h3 className="text-2xl font-black text-slate-800">{products.length} <span className="text-sm font-medium text-slate-400">Item</span></h3>
-                                </div>
-                                <div className="absolute right-0 bottom-0 opacity-10 transform translate-x-2 translate-y-2"><Package size={64}/></div>
+                                <div><p className="text-xs font-bold text-slate-400 uppercase">Total SKU</p><h3 className="text-2xl font-black text-slate-800">{products.length}</h3></div>
                             </div>
-                            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4 relative overflow-hidden group">
+                            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
                                 <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl"><Wallet size={24}/></div>
-                                <div>
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nilai Aset Stok</p>
-                                    <h3 className="text-2xl font-black text-slate-800">{formatCurrency(products.reduce((acc, p) => acc + ((parseFloat(p.cost)||0) * (parseInt(p.stock)||0)), 0))}</h3>
-                                </div>
-                                <div className="absolute right-0 bottom-0 opacity-10 transform translate-x-2 translate-y-2"><Wallet size={64}/></div>
+                                <div><p className="text-xs font-bold text-slate-400 uppercase">Nilai Aset</p><h3 className="text-2xl font-black text-slate-800">{formatCurrency(products.reduce((acc, p) => acc + ((parseFloat(p.cost)||0) * (parseInt(p.stock)||0)), 0))}</h3></div>
                             </div>
-                            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4 relative overflow-hidden group">
-                                <div className={`p-3 rounded-2xl ${products.filter(p => (parseInt(p.stock)||0) <= 5).length > 0 ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-400'}`}><Activity size={24}/></div>
-                                <div>
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Stok Menipis</p>
-                                    <h3 className={`text-2xl font-black ${products.filter(p => (parseInt(p.stock)||0) <= 5).length > 0 ? 'text-rose-600' : 'text-slate-800'}`}>{products.filter(p => (parseInt(p.stock)||0) <= 5).length} <span className="text-sm font-medium text-slate-400">Item</span></h3>
-                                </div>
-                                <div className="absolute right-0 bottom-0 opacity-10 transform translate-x-2 translate-y-2"><Activity size={64}/></div>
+                            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+                                <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl"><Activity size={24}/></div>
+                                <div><p className="text-xs font-bold text-slate-400 uppercase">Stok Menipis</p><h3 className="text-2xl font-black text-slate-800">{products.filter(p => (parseInt(p.stock)||0) <= 5).length}</h3></div>
                             </div>
                         </div>
                         
                         <div className="relative group">
-                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                <Search className="text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={20}/>
-                            </div>
-                            <input 
-                                type="text" 
-                                placeholder="Cari nama barang, kategori, atau kode SKU..." 
-                                className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 shadow-sm rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 font-medium transition-all"
-                                value={prodSearch}
-                                onChange={e => setProdSearch(e.target.value)}
-                            />
+                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><Search className="text-slate-400" size={20}/></div>
+                            <input type="text" placeholder="Cari barang..." className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 shadow-sm rounded-2xl focus:ring-4 focus:ring-indigo-500/10 font-medium" value={prodSearch} onChange={e => setProdSearch(e.target.value)}/>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {products.filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(prodSearch.toLowerCase()))).map(p => {
-                                const stockStatus = p.stock <= 5 ? 'critical' : p.stock <= 10 ? 'warning' : 'good';
-                                const statusColor = stockStatus === 'critical' ? 'bg-rose-500' : stockStatus === 'warning' ? 'bg-amber-500' : 'bg-emerald-500';
-                                const statusBg = stockStatus === 'critical' ? 'bg-rose-50' : stockStatus === 'warning' ? 'bg-amber-50' : 'bg-emerald-50';
-                                const statusText = stockStatus === 'critical' ? 'text-rose-700' : stockStatus === 'warning' ? 'text-amber-700' : 'text-emerald-700';
-
-                                return (
-                                    <div key={p.id} className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group flex flex-col h-full">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <div className="bg-indigo-50 text-indigo-600 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide">
-                                                {p.category || 'Umum'}
-                                            </div>
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => {setEditData(p); setActiveModal('product')}} className="p-2 bg-slate-50 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg transition"><Edit2 size={14}/></button>
-                                                <button onClick={() => deleteRecord('products', p.id)} className="p-2 bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition"><Trash2 size={14}/></button>
-                                            </div>
-                                        </div>
-                                        
-                                        <div className="flex-1">
-                                            <h4 className="font-bold text-lg text-slate-800 leading-tight mb-1">{p.name}</h4>
-                                            <p className="text-xs text-slate-400 font-mono bg-slate-50 inline-block px-1.5 rounded">{p.sku || 'NO-SKU'}</p>
-                                        </div>
-
-                                        <div className="mt-6 space-y-3">
-                                            <div className="flex justify-between items-center text-sm">
-                                                <span className="text-slate-400 font-medium">Jual</span>
-                                                <span className="font-bold text-slate-700">{formatCurrency(p.price)}</span>
-                                            </div>
-                                            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                                                <div className={`h-full rounded-full ${statusColor}`} style={{width: `${Math.min(100, (p.stock / 20) * 100)}%`}}></div>
-                                            </div>
-                                            <div className="flex justify-between items-center">
-                                                <span className={`text-xs font-bold px-2 py-0.5 rounded ${statusBg} ${statusText}`}>
-                                                    {p.stock} Stok
-                                                </span>
-                                                <span className="text-[10px] text-slate-400">
-                                                    HPP: {formatCurrency(p.cost)}
-                                                </span>
-                                            </div>
+                            {products.filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase())).map(p => (
+                                <div key={p.id} className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm hover:shadow-lg transition-shadow group flex flex-col h-full">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="bg-indigo-50 text-indigo-600 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase">{p.category || 'Umum'}</div>
+                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => {setEditData(p); setActiveModal('product')}} className="p-2 hover:bg-indigo-50 rounded-lg"><Edit2 size={14} className="text-slate-400"/></button>
+                                            <button onClick={() => deleteRecord('products', p.id)} className="p-2 hover:bg-rose-50 rounded-lg"><Trash2 size={14} className="text-slate-400"/></button>
                                         </div>
                                     </div>
-                                );
-                            })}
-                        </div>
-                        
-                        {products.filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(prodSearch.toLowerCase()))).length === 0 && (
-                            <div className="py-20 text-center">
-                                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300 animate-bounce">
-                                    <Package size={32}/>
+                                    <div className="flex-1">
+                                        <h4 className="font-bold text-lg text-slate-800 leading-tight mb-1">{p.name}</h4>
+                                        <p className="text-xs text-slate-400 font-mono bg-slate-50 inline-block px-1.5 rounded">{p.sku || 'NO-SKU'}</p>
+                                    </div>
+                                    <div className="mt-6 space-y-3">
+                                        <div className="flex justify-between items-center text-sm">
+                                            <span className="text-slate-400 font-medium">Jual</span>
+                                            <span className="font-bold text-slate-700">{formatCurrency(p.price)}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className={`text-xs font-bold px-2 py-0.5 rounded ${p.stock<=5?'bg-rose-100 text-rose-700':'bg-emerald-100 text-emerald-700'}`}>{p.stock} Stok</span>
+                                            <span className="text-[10px] text-slate-400">HPP: {formatCurrency(p.cost)}</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <h3 className="text-lg font-bold text-slate-600">Gudang Kosong</h3>
-                                <p className="text-slate-400">Tidak ada produk yang cocok dengan pencarian Tuan.</p>
-                            </div>
-                        )}
+                            ))}
+                        </div>
                     </div>
                 )}
 
                 {activeTab === 'reports' && (
                     <div className="space-y-8 animate-enter">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <div>
-                                <h2 className="text-3xl font-extrabold text-slate-800">Laporan Keuangan</h2>
-                                <p className="text-slate-500 mt-1">Analisis kinerja bisnis berdasarkan periode.</p>
-                            </div>
+                            <div><h2 className="text-3xl font-extrabold text-slate-800">Laporan Keuangan</h2></div>
                         </div>
 
                         <Card className="!p-6">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Dari Tanggal</label>
-                                    <input type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium" value={reportFilter.startDate} onChange={e=>setReportFilter({...reportFilter, startDate:e.target.value})} />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Sampai Tanggal</label>
-                                    <input type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium" value={reportFilter.endDate} onChange={e=>setReportFilter({...reportFilter, endDate:e.target.value})} />
-                                </div>
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-2">Dari</label><input type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" value={reportFilter.startDate} onChange={e=>setReportFilter({...reportFilter, startDate:e.target.value})} /></div>
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-2">Sampai</label><input type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" value={reportFilter.endDate} onChange={e=>setReportFilter({...reportFilter, endDate:e.target.value})} /></div>
                                 <div className="flex gap-2">
-                                    <button onClick={()=>exportToExcel(reportData?.transactions || [], "Laporan_Keuangan")} disabled={!reportData} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed font-bold flex items-center justify-center gap-2"><FileSpreadsheet size={18}/> Excel</button>
-                                    <button onClick={()=>exportToPDF(["Tgl","Ket","Jml"], (reportData?.transactions || []).map(t=>[formatDate(t.date), t.description, formatCurrency(t.amount)]), "Laporan")} disabled={!reportData} className="flex-1 py-3 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed font-bold flex items-center justify-center gap-2"><FileIcon size={18}/> PDF</button>
+                                    <button onClick={()=>exportToExcel(reportData?.transactions || [], "Laporan")} disabled={!reportData} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold flex justify-center gap-2"><FileSpreadsheet size={18}/> Excel</button>
+                                    <button onClick={()=>exportToPDF(["Tgl","Ket","Jml"], (reportData?.transactions || []).map(t=>[formatDate(t.date), t.description, formatCurrency(t.amount)]), "Laporan")} disabled={!reportData} className="flex-1 py-3 bg-rose-600 text-white rounded-xl hover:bg-rose-700 font-bold flex justify-center gap-2"><FileIcon size={18}/> PDF</button>
                                 </div>
                             </div>
                         </Card>
 
-                        {reportData ? (
+                        {reportData && (
                             <div className="space-y-6 animate-enter">
-                                {/* Summary Cards */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 relative overflow-hidden">
-                                        <div className="relative z-10">
-                                            <p className="text-emerald-600 font-bold text-sm uppercase tracking-wider mb-1">Total Pemasukan</p>
-                                            <h3 className="text-3xl font-black text-emerald-800">{formatCurrency(reportData.income)}</h3>
-                                        </div>
-                                        <ArrowDownRight className="absolute right-4 bottom-4 text-emerald-200" size={64} />
+                                    <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100">
+                                        <p className="text-emerald-600 font-bold text-sm uppercase">Total Pemasukan</p>
+                                        <h3 className="text-3xl font-black text-emerald-800">{formatCurrency(reportData.income)}</h3>
                                     </div>
-                                    <div className="bg-rose-50 p-6 rounded-3xl border border-rose-100 relative overflow-hidden">
-                                        <div className="relative z-10">
-                                            <p className="text-rose-600 font-bold text-sm uppercase tracking-wider mb-1">Total Pengeluaran</p>
-                                            <h3 className="text-3xl font-black text-rose-800">{formatCurrency(reportData.expense)}</h3>
-                                        </div>
-                                        <ArrowUpRight className="absolute right-4 bottom-4 text-rose-200" size={64} />
+                                    <div className="bg-rose-50 p-6 rounded-3xl border border-rose-100">
+                                        <p className="text-rose-600 font-bold text-sm uppercase">Total Pengeluaran</p>
+                                        <h3 className="text-3xl font-black text-rose-800">{formatCurrency(reportData.expense)}</h3>
                                     </div>
-                                    <div className={`p-6 rounded-3xl border relative overflow-hidden ${reportData.balance >= 0 ? 'bg-indigo-50 border-indigo-100' : 'bg-amber-50 border-amber-100'}`}>
-                                        <div className="relative z-10">
-                                            <p className={`${reportData.balance >= 0 ? 'text-indigo-600' : 'text-amber-600'} font-bold text-sm uppercase tracking-wider mb-1`}>Laba / Rugi Bersih</p>
-                                            <h3 className={`text-3xl font-black ${reportData.balance >= 0 ? 'text-indigo-800' : 'text-amber-800'}`}>{formatCurrency(reportData.balance)}</h3>
-                                        </div>
-                                        <Wallet className={`absolute right-4 bottom-4 ${reportData.balance >= 0 ? 'text-indigo-200' : 'text-amber-200'}`} size={64} />
+                                    <div className={`p-6 rounded-3xl border ${reportData.balance >= 0 ? 'bg-indigo-50 border-indigo-100' : 'bg-amber-50 border-amber-100'}`}>
+                                        <p className="font-bold text-sm uppercase text-slate-500">Laba / Rugi Bersih</p>
+                                        <h3 className="text-3xl font-black text-slate-800">{formatCurrency(reportData.balance)}</h3>
                                     </div>
                                 </div>
-
-                                {/* Table Details */}
-                                <Card title="Rincian Transaksi" subtitle={`Periode: ${formatDate(reportFilter.startDate)} - ${formatDate(reportFilter.endDate)}`}>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm text-left border-collapse" style={{borderSpacing: '0 10px'}}>
-                                            <thead className="bg-slate-50 text-xs uppercase text-slate-500 font-bold tracking-wider">
-                                                <tr>
-                                                    <th className="px-4 py-3 rounded-l-xl">Tanggal</th>
-                                                    <th className="px-4 py-3">Keterangan</th>
-                                                    <th className="px-4 py-3">Tipe</th>
-                                                    <th className="px-4 py-3 text-right rounded-r-xl">Jumlah</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {reportData.transactions.length > 0 ? reportData.transactions.map((t) => (
-                                                    <tr key={t.id} className="hover:bg-slate-50 transition-colors">
-                                                        <td className="px-4 py-3 font-medium text-slate-600">{formatDate(t.date)}</td>
-                                                        <td className="px-4 py-3 font-bold text-slate-800">{t.description} <span className="text-xs font-normal text-slate-400 block">{t.category}</span></td>
-                                                        <td className="px-4 py-3">
-                                                            <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${t.type === 'income' ? 'bg-emerald-100 text-emerald-700' : t.type === 'expense' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>
-                                                                {t.type === 'income' ? 'Masuk' : t.type === 'expense' ? 'Keluar' : 'Transfer'}
-                                                            </span>
-                                                        </td>
-                                                        <td className={`px-4 py-3 text-right font-bold ${t.type === 'income' ? 'text-emerald-600' : t.type === 'expense' ? 'text-rose-600' : 'text-slate-700'}`}>
-                                                            {formatCurrency(t.amount)}
-                                                        </td>
-                                                    </tr>
-                                                )) : (
-                                                    <tr><td colSpan="4" className="text-center py-8 text-slate-400">Tidak ada transaksi.</td></tr>
-                                                )}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </Card>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center py-16 bg-white rounded-3xl border-2 border-dashed border-slate-200 text-center">
-                                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 text-slate-300">
-                                    <FileText size={32} />
-                                </div>
-                                <h3 className="text-lg font-bold text-slate-700">Belum ada periode dipilih</h3>
-                                <p className="text-slate-400 max-w-sm mt-1">Tentukan tanggal mulai dan selesai untuk melihat laporan.</p>
                             </div>
                         )}
                     </div>
@@ -1365,131 +1058,60 @@ function App() {
                 {activeTab === 'assets' && (
                     <div className="space-y-8 animate-enter">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <div>
-                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Daftar Aset</h2>
-                                <p className="text-slate-500 mt-1">Manajemen aset fisik dan piutang tertunda.</p>
-                            </div>
+                            <div><h2 className="text-3xl font-extrabold text-slate-800">Daftar Aset & Piutang</h2></div>
                         </div>
-
-                        {/* Top Stats */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="bg-gradient-to-br from-indigo-600 to-blue-700 p-6 rounded-3xl text-white shadow-xl relative overflow-hidden ring-1 ring-white/20">
-                                <div className="relative z-10 flex justify-between items-center">
-                                    <div>
-                                        <p className="text-indigo-200 text-xs font-bold uppercase tracking-wider mb-1">Total Nilai Aset</p>
-                                        <h3 className="text-3xl font-black">{formatCurrency(dashboardStats.totalAssets)}</h3>
-                                        <p className="text-xs text-indigo-200 mt-2">{assets.length} Aset Terdaftar</p>
-                                    </div>
-                                    <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm">
-                                        <Package size={32} className="text-white"/>
-                                    </div>
-                                </div>
-                                <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+                            <div className="bg-indigo-50 p-6 rounded-3xl border border-indigo-100">
+                                <p className="text-indigo-600 text-xs font-bold uppercase">Total Nilai Aset</p>
+                                <h3 className="text-3xl font-black">{formatCurrency(dashboardStats.totalAssets)}</h3>
                             </div>
-                            <div className="bg-gradient-to-br from-amber-500 to-orange-600 p-6 rounded-3xl text-white shadow-xl relative overflow-hidden ring-1 ring-white/20">
-                                <div className="relative z-10 flex justify-between items-center">
-                                    <div>
-                                        <p className="text-amber-100 text-xs font-bold uppercase tracking-wider mb-1">Total Piutang</p>
-                                        <h3 className="text-3xl font-black">{formatCurrency(dashboardStats.totalReceivables)}</h3>
-                                        <p className="text-xs text-amber-100 mt-2">{receivables.filter(r=>r.status==='pending').length} Belum Lunas</p>
-                                    </div>
-                                    <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm">
-                                        <FileText size={32} className="text-white"/>
-                                    </div>
-                                </div>
-                                <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+                            <div className="bg-amber-50 p-6 rounded-3xl border border-amber-100">
+                                <p className="text-amber-600 text-xs font-bold uppercase">Total Piutang</p>
+                                <h3 className="text-3xl font-black">{formatCurrency(dashboardStats.totalReceivables)}</h3>
                             </div>
                         </div>
-
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                            {/* Assets Column */}
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center px-2">
-                                    <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><Package size={20} className="text-indigo-500"/> Daftar Aset</h3>
-                                    <button onClick={()=>{setEditData(null);setActiveModal('asset')}} className="text-xs font-bold bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition flex items-center gap-1"><Plus size={14}/> Tambah</button>
+                                    <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><Package size={20}/> Aset</h3>
+                                    <button onClick={()=>{setEditData(null);setActiveModal('asset')}} className="text-xs font-bold bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg"><Plus size={14}/> Tambah</button>
                                 </div>
                                 <div className="bg-white rounded-3xl p-2 shadow-sm border border-slate-100">
-                                    <div className="overflow-hidden">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="text-xs text-slate-400 font-bold uppercase border-b border-slate-50">
-                                                <tr>
-                                                    <th className="px-4 py-3">Nama Aset</th>
-                                                    <th className="px-4 py-3 text-right">Nilai</th>
-                                                    <th className="px-4 py-3 text-right"></th>
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="text-xs text-slate-400 font-bold uppercase border-b border-slate-50"><tr><th className="px-4 py-3">Nama</th><th className="px-4 py-3 text-right">Nilai</th><th className="px-4 py-3"></th></tr></thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                            {assets.map(a=>(
+                                                <tr key={a.id} className="group hover:bg-slate-50">
+                                                    <td className="px-4 py-3.5"><div className="font-bold text-slate-700">{a.name}</div><div className="text-[10px] text-slate-400">{a.category}</div></td>
+                                                    <td className="px-4 py-3.5 text-right font-bold text-slate-600">{formatCurrency(a.value)}</td>
+                                                    <td className="px-4 py-3.5 text-right"><button onClick={()=>deleteRecord('assets',a.id)} className="text-slate-300 hover:text-rose-500"><Trash2 size={16}/></button></td>
                                                 </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-50">
-                                                {assets.map(a=>(
-                                                    <tr key={a.id} className="group hover:bg-slate-50/50 transition-colors">
-                                                        <td className="px-4 py-3.5">
-                                                            <div className="font-bold text-slate-700">{a.name}</div>
-                                                            <div className="flex gap-2 mt-1">
-                                                                <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded uppercase tracking-wide">{a.category}</span>
-                                                                <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded capitalize">{a.condition}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-4 py-3.5 text-right font-bold text-slate-600 group-hover:text-indigo-600 transition-colors">
-                                                            {formatCurrency(a.value)}
-                                                        </td>
-                                                        <td className="px-4 py-3.5 text-right">
-                                                            <button onClick={()=>deleteRecord('assets',a.id)} className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition"><Trash2 size={16}/></button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                                {assets.length === 0 && <tr><td colSpan="3" className="text-center py-8 text-slate-400 italic">Belum ada aset.</td></tr>}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
-
-                            {/* Receivables Column */}
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center px-2">
-                                    <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><FileText size={20} className="text-amber-500"/> Buku Piutang</h3>
-                                    <button onClick={()=>{setEditData(null);setActiveModal('receivable')}} className="text-xs font-bold bg-amber-50 text-amber-600 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition flex items-center gap-1"><Plus size={14}/> Tambah</button>
+                                    <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><FileText size={20}/> Piutang</h3>
+                                    <button onClick={()=>{setEditData(null);setActiveModal('receivable')}} className="text-xs font-bold bg-amber-50 text-amber-600 px-3 py-1.5 rounded-lg"><Plus size={14}/> Tambah</button>
                                 </div>
                                 <div className="bg-white rounded-3xl p-2 shadow-sm border border-slate-100">
-                                    <div className="overflow-hidden">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="text-xs text-slate-400 font-bold uppercase border-b border-slate-50">
-                                                <tr>
-                                                    <th className="px-4 py-3">Peminjam</th>
-                                                    <th className="px-4 py-3 text-right">Jumlah</th>
-                                                    <th className="px-4 py-3 text-right">Aksi</th>
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="text-xs text-slate-400 font-bold uppercase border-b border-slate-50"><tr><th className="px-4 py-3">Nama</th><th className="px-4 py-3 text-right">Jml</th><th className="px-4 py-3"></th></tr></thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                            {receivables.map(r=>(
+                                                <tr key={r.id} className="group hover:bg-slate-50">
+                                                    <td className="px-4 py-3.5"><div className="font-bold text-slate-700">{r.customerName}</div><div className="text-[10px] text-slate-400">{r.status==='paid'?'Lunas':'Belum Lunas'}</div></td>
+                                                    <td className="px-4 py-3.5 text-right font-bold text-slate-600">{formatCurrency(r.amount)}</td>
+                                                    <td className="px-4 py-3.5 text-right flex justify-end gap-2">
+                                                        {r.status!=='paid' && <button onClick={()=>handlePayReceivable(r)} className="text-emerald-500"><Banknote size={16}/></button>}
+                                                        <button onClick={()=>deleteRecord('receivables',r.id)} className="text-slate-300 hover:text-rose-500"><Trash2 size={16}/></button>
+                                                    </td>
                                                 </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-50">
-                                                {receivables.sort((a,b) => (a.status === 'paid') - (b.status === 'paid')).map(r=>(
-                                                    <tr key={r.id} className={`group transition-colors ${r.status==='paid'?'bg-slate-50/50 opacity-60 grayscale':'hover:bg-amber-50/30'}`}>
-                                                        <td className="px-4 py-3.5">
-                                                            <div className="font-bold text-slate-700 flex items-center gap-2">
-                                                                {r.customerName}
-                                                                {r.status==='paid' && <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold uppercase">Lunas</span>}
-                                                            </div>
-                                                            <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
-                                                                <span>Jatuh Tempo: {formatDate(r.dueDate)}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-4 py-3.5 text-right font-bold text-slate-700">
-                                                            {formatCurrency(r.amount)}
-                                                        </td>
-                                                        <td className="px-4 py-3.5 text-right">
-                                                            <div className="flex justify-end gap-1">
-                                                                {r.status!=='paid' && (
-                                                                    <button onClick={()=>handlePayReceivable(r)} className="p-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white rounded-lg transition shadow-sm" title="Tandai Lunas">
-                                                                        <Banknote size={16}/>
-                                                                    </button>
-                                                                )}
-                                                                <button onClick={()=>deleteRecord('receivables',r.id)} className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition"><Trash2 size={16}/></button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                                {receivables.length === 0 && <tr><td colSpan="3" className="text-center py-8 text-slate-400 italic">Tidak ada catatan piutang.</td></tr>}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>
@@ -1498,292 +1120,85 @@ function App() {
 
                 {activeTab === 'targets' && (
                     <div className="space-y-8 animate-enter">
-                        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                            <div>
-                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Target Bisnis</h2>
-                                <p className="text-slate-500 mt-1">Sasaran strategis pengembangan usaha.</p>
-                            </div>
-                            <button onClick={()=>{setEditData(null);setActiveModal('target')}} className="px-5 py-2.5 bg-violet-600 text-white rounded-xl hover:bg-violet-700 shadow-lg shadow-violet-200 font-bold text-sm transition flex items-center gap-2"><Plus size={18}/> Target Baru</button>
+                        <div className="flex justify-between items-center gap-4">
+                            <h2 className="text-3xl font-extrabold text-slate-800">Target Bisnis</h2>
+                            <button onClick={()=>{setEditData(null);setActiveModal('target')}} className="px-5 py-2.5 bg-violet-600 text-white rounded-xl font-bold text-sm flex items-center gap-2"><Plus size={18}/> Baru</button>
                         </div>
-
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                            {targets.map(t => {
-                                // Simple mock progress calculation for visual demo
-                                // Assuming 'revenue' targets relate to current income for demo purposes
-                                const currentProgress = t.type === 'revenue' ? dashboardStats.income : (t.type === 'sales_count' ? dashboardStats.income / 100000 : 0); // Mock logic
-                                const progressPercent = Math.min(100, (currentProgress / t.targetAmount) * 100) || 0;
-                                
-                                return (
-                                    <div key={t.id} className="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-lg hover:-translate-y-1 transition-all duration-300 relative overflow-hidden group">
-                                        {/* Background Decoration */}
-                                        <div className="absolute -right-6 -top-6 w-24 h-24 bg-violet-50 rounded-full group-hover:bg-violet-100 transition-colors"></div>
-                                        
-                                        <div className="relative z-10">
-                                            <div className="flex justify-between items-start mb-4">
-                                                <div className={`p-3 rounded-2xl ${t.type === 'revenue' ? 'bg-emerald-50 text-emerald-600' : 'bg-violet-50 text-violet-600'}`}>
-                                                    {t.type === 'revenue' ? <TrendingUp size={24}/> : <Target size={24}/>}
-                                                </div>
-                                                <button onClick={()=>deleteRecord('targets',t.id)} className="text-slate-300 hover:text-rose-500 transition"><Trash2 size={18}/></button>
-                                            </div>
-                                            
-                                            <h4 className="text-lg font-bold text-slate-800 mb-1">{t.name}</h4>
-                                            <p className="text-xs text-slate-400 font-medium mb-4 uppercase tracking-wide">{t.period} • {t.type}</p>
-                                            
-                                            <div className="flex items-end justify-between mb-2">
-                                                <span className="text-3xl font-black text-slate-800">{formatCurrency(t.targetAmount)}</span>
-                                            </div>
-
-                                            {/* Progress Bar */}
-                                            <div className="space-y-2">
-                                                <div className="flex justify-between text-xs font-bold text-slate-500">
-                                                    <span>Progres</span>
-                                                    <span>{t.type === 'revenue' ? `${progressPercent.toFixed(0)}%` : 'Manual'}</span>
-                                                </div>
-                                                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                                                    <div 
-                                                        className={`h-full rounded-full transition-all duration-1000 ease-out ${progressPercent >= 100 ? 'bg-emerald-500' : 'bg-violet-500'}`} 
-                                                        style={{width: `${t.type === 'revenue' ? progressPercent : 20}%`}}
-                                                    ></div>
-                                                </div>
-                                                <p className="text-[10px] text-slate-400 italic mt-2">
-                                                    {t.notes || "Gas terus, Tuan!"}
-                                                </p>
-                                            </div>
-                                        </div>
+                            {targets.map(t => (
+                                <div key={t.id} className="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm hover:shadow-lg transition-shadow">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="p-3 bg-violet-50 text-violet-600 rounded-2xl"><Target size={24}/></div>
+                                        <button onClick={()=>deleteRecord('targets',t.id)} className="text-slate-300 hover:text-rose-500"><Trash2 size={18}/></button>
                                     </div>
-                                );
-                            })}
-                            
-                            {targets.length === 0 && (
-                                <div className="col-span-full py-16 text-center bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300 shadow-sm">
-                                        <Target size={32}/>
-                                    </div>
-                                    <h3 className="text-lg font-bold text-slate-600">Belum Ada Target</h3>
-                                    <p className="text-slate-400 mt-1 max-w-md mx-auto">Tetapkan target penjualan untuk memacu pertumbuhan.</p>
-                                    <button onClick={()=>{setEditData(null);setActiveModal('target')}} className="mt-4 text-sm font-bold text-violet-600 hover:text-violet-700">Buat Target Baru &rarr;</button>
+                                    <h4 className="text-lg font-bold text-slate-800">{t.name}</h4>
+                                    <p className="text-3xl font-black text-slate-800 mt-2">{formatCurrency(t.targetAmount)}</p>
+                                    <p className="text-xs text-slate-400 mt-2 italic">{t.notes || "Semangat Tuan!"}</p>
                                 </div>
-                            )}
+                            ))}
                         </div>
                     </div>
                 )}
             </div>
         </main>
 
-        {/* Mobile Bottom Nav */}
-        <nav className="md:hidden fixed bottom-0 w-full bg-white/90 backdrop-blur-lg border-t border-slate-200 px-6 py-3 flex justify-between items-center z-40 safe-area-pb shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]">
-            <MobileNavItem icon={LayoutDashboard} label="Beranda" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-            <MobileNavItem icon={Banknote} label="Transaksi" active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} />
-            <div className="relative -top-8">
-                <button onClick={() => {setEditData(null); setActiveModal('income')}} className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-xl shadow-indigo-500/40 border-[6px] border-[#f8fafc] transition-transform active:scale-90">
-                    <Plus size={32}/>
-                </button>
-            </div>
-            <MobileNavItem icon={Package} label="Gudang" active={activeTab === 'warehouse'} onClick={() => setActiveTab('warehouse')} />
+        <nav className="md:hidden fixed bottom-0 w-full bg-white/95 border-t border-slate-200 px-6 py-3 flex justify-between items-center z-40 safe-area-pb">
+            <MobileNavItem icon={LayoutDashboard} label="Home" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+            <MobileNavItem icon={Banknote} label="Trans" active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} />
+            <div className="-top-8 relative"><button onClick={() => {setEditData(null); setActiveModal('income')}} className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-xl border-4 border-slate-50"><Plus size={32}/></button></div>
+            <MobileNavItem icon={Package} label="Stok" active={activeTab === 'warehouse'} onClick={() => setActiveTab('warehouse')} />
             <MobileNavItem icon={Menu} label="Menu" active={['reports', 'assets', 'targets'].includes(activeTab)} onClick={() => setActiveTab('assets')} />
         </nav>
 
-        {/* --- MODALS & FORMS --- */}
-        <Modal isOpen={activeModal === 'modal'} onClose={() => setActiveModal(null)} title="Input Modal Usaha"><TransactionForm type="income" subtype="modal" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
+        {/* MODALS */}
+        <Modal isOpen={activeModal === 'modal'} onClose={() => setActiveModal(null)} title="Input Modal"><TransactionForm type="income" subtype="modal" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         <Modal isOpen={activeModal === 'sales'} onClose={() => setActiveModal(null)} title="Input Penjualan"><TransactionForm type="income" subtype="sales" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        <Modal isOpen={activeModal === 'sales_stock'} onClose={() => setActiveModal(null)} title="Penjualan Produk"><TransactionForm type="income" subtype="stock_sale" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
+        <Modal isOpen={activeModal === 'sales_stock'} onClose={() => setActiveModal(null)} title="Jual Produk"><TransactionForm type="income" subtype="stock_sale" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
+        <Modal isOpen={activeModal === 'income'} onClose={() => setActiveModal(null)} title="Pemasukan"><TransactionForm type="income" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
+        <Modal isOpen={activeModal === 'expense'} onClose={() => setActiveModal(null)} title="Pengeluaran"><TransactionForm type="expense" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
+        <Modal isOpen={activeModal === 'transfer'} onClose={() => setActiveModal(null)} title="Transfer"><TransactionForm type="transfer" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
         
-        {/* Modal Koreksi Saldo */}
-        <Modal isOpen={activeModal === 'adjustCash'} onClose={() => setActiveModal(null)} title="Koreksi Saldo Kas (Opname)">
-            <form onSubmit={handleAdjustCash} className="space-y-5">
-                <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl text-sm text-amber-800">
-                    <p className="font-bold flex items-center gap-2 mb-1"><Activity size={16}/> Penyesuaian Otomatis</p>
-                    <p>Masukkan jumlah uang fisik yang sebenarnya ada di laci. Sistem akan catat selisihnya.</p>
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Saldo di Aplikasi</label>
-                    <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 font-bold text-slate-500">
-                        {formatCurrency(dashboardStats.cashBalance)}
-                    </div>
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Saldo Fisik Sebenarnya (Rp)</label>
-                    <input name="realBalance" type="number" required min="0" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-lg text-slate-800" placeholder="0" />
-                </div>
-                <button className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">Sesuaikan Saldo</button>
+        <Modal isOpen={activeModal === 'adjustCash'} onClose={() => setActiveModal(null)} title="Opname Kas">
+            <form onSubmit={handleAdjustCash} className="space-y-4">
+                <div className="bg-amber-50 p-4 rounded-xl text-sm text-amber-800">Saldo Fisik: Berapa uang di laci sekarang?</div>
+                <input name="realBalance" type="number" className="w-full border rounded-xl p-3 text-lg font-bold" placeholder="0" />
+                <button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl">Simpan</button>
             </form>
         </Modal>
 
-        <Modal isOpen={activeModal === 'income'} onClose={() => setActiveModal(null)} title="Input Pemasukan"><TransactionForm type="income" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        <Modal isOpen={activeModal === 'expense'} onClose={() => setActiveModal(null)} title="Input Pengeluaran"><TransactionForm type="expense" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        <Modal isOpen={activeModal === 'transfer'} onClose={() => setActiveModal(null)} title="Transfer Dana"><TransactionForm type="transfer" onClose={() => setActiveModal(null)} initialData={editData} user={user} products={products} dashboardStats={dashboardStats} onSave={handleTransactionSave} /></Modal>
-        <Modal isOpen={activeModal === 'product'} onClose={() => setActiveModal(null)} title="Produk Gudang">
-             <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); const data = { name: fd.get('name'), sku: fd.get('sku'), category: fd.get('category'), supplier: fd.get('supplier'), price: parseFloat(fd.get('price')), cost: parseFloat(fd.get('cost')), stock: parseInt(fd.get('stock')) }; if(editData) updateRecord('products', editData.id, data); else addRecord('products', data); }} className="space-y-5">
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kode SKU</label><input name="sku" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={editData?.sku} /></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Produk</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={editData?.name} /></div>
+        <Modal isOpen={activeModal === 'product'} onClose={() => setActiveModal(null)} title="Produk">
+             <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); const data = { name: fd.get('name'), sku: fd.get('sku'), category: fd.get('category'), price: parseFloat(fd.get('price')), cost: parseFloat(fd.get('cost')), stock: parseInt(fd.get('stock')) }; if(editData) updateRecord('products', editData.id, data); else addRecord('products', data); }} className="space-y-4">
+                <input name="sku" placeholder="SKU" className="w-full border p-3 rounded-xl" defaultValue={editData?.sku} />
+                <input name="name" placeholder="Nama Produk" className="w-full border p-3 rounded-xl" required defaultValue={editData?.name} />
+                <div className="grid grid-cols-3 gap-2">
+                    <input name="cost" type="number" placeholder="HPP" className="border p-3 rounded-xl" defaultValue={editData?.cost} />
+                    <input name="price" type="number" placeholder="Jual" className="border p-3 rounded-xl" required defaultValue={editData?.price} />
+                    <input name="stock" type="number" placeholder="Stok" className="border p-3 rounded-xl" required defaultValue={editData?.stock} />
                 </div>
-                <div className="grid grid-cols-3 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">HPP (Beli)</label><input name="cost" type="number" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={editData?.cost} /></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Harga Jual</label><input name="price" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={editData?.price} /></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Stok</label><input name="stock" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={editData?.stock} /></div>
-                </div>
-                <button className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">Simpan Produk</button>
+                <button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl">Simpan</button>
             </form>
         </Modal>
 
-        <Modal isOpen={activeModal === 'asset'} onClose={() => setActiveModal(null)} title="Input Data Aset">
-            <form onSubmit={(e) => { 
-                e.preventDefault(); 
-                const fd = new FormData(e.target); 
-                addRecord('assets', { 
-                    name: fd.get('name'), 
-                    category: fd.get('category'), 
-                    value: parseFloat(fd.get('value')), 
-                    purchaseDate: fd.get('purchaseDate'), 
-                    condition: fd.get('condition'), 
-                    notes: fd.get('notes') 
-                }); 
-            }} className="space-y-5">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Aset</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Contoh: Mesin Jahit High Speed" /></div>
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kategori</label><select name="category" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500"><option value="equipment">Peralatan</option><option value="electronic">Elektronik</option><option value="vehicle">Kendaraan</option><option value="furniture">Perabotan</option><option value="property">Properti</option><option value="other">Lainnya</option></select></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kondisi</label><select name="condition" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500"><option value="good">Baik / Baru</option><option value="used">Bekas</option><option value="damaged">Rusak</option></select></div>
-                </div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nilai Aset (Rp)</label><input name="value" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0" /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tanggal Pembelian</label><input name="purchaseDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={new Date().toISOString().split('T')[0]} /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Keterangan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Catatan tambahan..."></textarea></div>
-                <button className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl transition hover:bg-indigo-700 shadow-lg">Simpan Aset</button>
-            </form>
-        </Modal>
-
-        <Modal isOpen={activeModal === 'receivable'} onClose={() => setActiveModal(null)} title="Catat Piutang Baru">
-            <form onSubmit={(e) => { 
-                e.preventDefault(); 
-                const fd = new FormData(e.target); 
-                addRecord('receivables', { 
-                    customerName: fd.get('customerName'), 
-                    contactInfo: fd.get('contactInfo'), 
-                    amount: parseFloat(fd.get('amount')), 
-                    startDate: fd.get('startDate'), 
-                    dueDate: fd.get('dueDate'), 
-                    notes: fd.get('notes'), 
-                    status: 'pending' 
-                }); 
-            }} className="space-y-5">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Peminjam</label><input name="customerName" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Nama Lengkap" /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kontak (HP/WA)</label><input name="contactInfo" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Contoh: 0812..." /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jumlah Piutang (Rp)</label><input name="amount" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-slate-700" placeholder="0" /></div>
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tanggal Pinjam</label><input name="startDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-500" defaultValue={new Date().toISOString().split('T')[0]} /></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jatuh Tempo</label><input name="dueDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-500" /></div>
-                </div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Catatan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-500" placeholder="Keterangan..."></textarea></div>
-                <button className="w-full bg-amber-600 text-white font-bold py-4 rounded-xl transition hover:bg-amber-700 shadow-lg">Simpan Piutang</button>
-            </form>
-        </Modal>
-
-        <Modal isOpen={activeModal === 'target'} onClose={() => setActiveModal(null)} title="Tetapkan Target Bisnis">
-            <form onSubmit={(e) => { 
-                e.preventDefault(); 
-                const fd = new FormData(e.target); 
-                addRecord('targets', { 
-                    name: fd.get('name'), 
-                    type: fd.get('type'), 
-                    targetAmount: parseFloat(fd.get('targetAmount')), 
-                    period: fd.get('period'), 
-                    startDate: fd.get('startDate'), 
-                    notes: fd.get('notes') 
-                }); 
-            }} className="space-y-5">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Judul Target</label><input name="name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-500" placeholder="Contoh: Omzet Penjualan Januari" /></div>
-                <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jenis Target</label><select name="type" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-500"><option value="revenue">Omzet</option><option value="profit">Laba</option><option value="sales_count">Qty</option><option value="other">Lainnya</option></select></div>
-                    <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Periode</label><select name="period" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-500"><option value="monthly">Bulanan</option><option value="quarterly">Triwulan</option><option value="yearly">Tahunan</option></select></div>
-                </div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Angka Target</label><input name="targetAmount" type="number" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-500" placeholder="0" /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mulai Tanggal</label><input name="startDate" type="date" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-500" defaultValue={new Date().toISOString().split('T')[0]} /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Strategi / Catatan</label><textarea name="notes" rows="2" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-500" placeholder="Contoh: Fokus genjot iklan di Instagram"></textarea></div>
-                <button className="w-full bg-purple-600 text-white font-bold py-4 rounded-xl transition hover:bg-purple-700 shadow-lg">Simpan Target</button>
-            </form>
-        </Modal>
+        <Modal isOpen={activeModal === 'asset'} onClose={() => setActiveModal(null)} title="Aset"><form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); addRecord('assets', { name: fd.get('name'), category: fd.get('category'), value: parseFloat(fd.get('value')), purchaseDate: fd.get('purchaseDate'), condition: fd.get('condition'), notes: fd.get('notes') }); }} className="space-y-4"><input name="name" placeholder="Nama Aset" className="w-full border p-3 rounded-xl" required /><input name="value" type="number" placeholder="Nilai (Rp)" className="w-full border p-3 rounded-xl" required /><button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl">Simpan</button></form></Modal>
+        <Modal isOpen={activeModal === 'receivable'} onClose={() => setActiveModal(null)} title="Piutang"><form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); addRecord('receivables', { customerName: fd.get('customerName'), amount: parseFloat(fd.get('amount')), dueDate: fd.get('dueDate'), status: 'pending' }); }} className="space-y-4"><input name="customerName" placeholder="Peminjam" className="w-full border p-3 rounded-xl" required /><input name="amount" type="number" placeholder="Jumlah" className="w-full border p-3 rounded-xl" required /><input name="dueDate" type="date" className="w-full border p-3 rounded-xl" required /><button className="w-full bg-amber-600 text-white font-bold py-3 rounded-xl">Simpan</button></form></Modal>
+        <Modal isOpen={activeModal === 'target'} onClose={() => setActiveModal(null)} title="Target"><form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); addRecord('targets', { name: fd.get('name'), type: 'revenue', targetAmount: parseFloat(fd.get('targetAmount')), period: 'monthly' }); }} className="space-y-4"><input name="name" placeholder="Judul Target" className="w-full border p-3 rounded-xl" required /><input name="targetAmount" type="number" placeholder="Target (Rp)" className="w-full border p-3 rounded-xl" required /><button className="w-full bg-violet-600 text-white font-bold py-3 rounded-xl">Simpan</button></form></Modal>
         
-        {/* Import Modal */}
-        <Modal isOpen={activeModal === 'import'} onClose={() => setActiveModal(null)} title="Import Data Excel">
-            <div className="space-y-5">
-                <div className="flex justify-between items-end">
-                    <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-1">Jenis Data</label>
-                        <p className="text-xs text-slate-400">Otomatis terpilih: <span className="font-bold text-indigo-600 uppercase">{importTypeState === 'transactions' ? `Transaksi (${importContext})` : 'Gudang Produk'}</span></p>
-                    </div>
-                    <button onClick={downloadTemplate} className="text-sm font-bold text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition flex items-center gap-1"><Download size={14}/> Unduh Template</button>
-                </div>
-                
-                <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-800">
-                    <p className="font-bold mb-2 flex items-center gap-2"><FileSpreadsheet size={16}/> Format Kolom Wajib:</p>
-                    {importTypeState === 'transactions' ? (
-                        <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            {importContext === 'sales' ? (
-                                <>
-                                    <li><b>Tanggal</b> (YYYY-MM-DD)</li>
-                                    <li><b>Barang</b> (Nama Produk)</li>
-                                    <li><b>Qty</b> (Jumlah Pcs)</li>
-                                    <li><b>Total</b> (Nilai Rupiah)</li>
-                                    <li><b>Channel</b> (Shopee/Tokopedia/dll)</li>
-                                </>
-                            ) : (
-                                <>
-                                    <li><b>Tanggal</b> (YYYY-MM-DD)</li>
-                                    <li><b>Deskripsi/Sumber</b></li>
-                                    <li><b>Jumlah</b></li>
-                                    <li><b>Jenis</b> (income/expense) & <b>Kategori</b> (Opsional)</li>
-                                </>
-                            )}
-                        </ul>
-                    ) : (
-                        <ul className="list-disc pl-5 space-y-1 text-indigo-700/80">
-                            <li><b>Kode</b> (SKU)</li>
-                            <li><b>Nama</b> (Nama Produk)</li>
-                            <li><b>Harga_Beli</b> (HPP)</li>
-                            <li><b>Harga_Jual</b> (Jual)</li>
-                            <li><b>Stok</b> (Awal)</li>
-                            <li><b>Supplier</b></li>
-                        </ul>
-                    )}
-                </div>
-
-                <div 
-                    className="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-50 transition group" 
-                    onClick={() => document.getElementById('file_upload').click()}
-                >
-                    <div className="p-3 bg-indigo-50 rounded-full mb-3 group-hover:scale-110 transition-transform">
-                        <FileSpreadsheet size={32} className="text-indigo-600" />
-                    </div>
-                    <span className="text-sm font-bold text-slate-700">Klik untuk pilih berkas Excel</span>
-                    <span className="text-xs text-slate-500 mt-1">atau tarik berkas ke sini</span>
-                    <input 
-                        id="file_upload" 
-                        type="file" 
-                        accept=".xlsx, .xls" 
-                        onChange={handleFileImport} 
-                        className="hidden" 
-                    />
-                </div>
-                <p className="text-xs text-slate-400 text-center">Pastikan format kolom sesuai template.</p>
+        <Modal isOpen={activeModal === 'import'} onClose={() => setActiveModal(null)} title="Import Data">
+            <div className="space-y-4 text-center">
+                <p className="text-sm text-slate-500">Pilih file Excel (.xlsx). Pastikan format kolom sesuai.</p>
+                <div className="flex gap-2 justify-center"><button onClick={downloadTemplate} className="text-indigo-600 font-bold text-sm border px-3 py-2 rounded-lg">Download Template</button></div>
+                <input type="file" accept=".xlsx, .xls" onChange={handleFileImport} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
             </div>
         </Modal>
         
-        {/* Advisor Modal */}
-        <Modal isOpen={showAdvisor} onClose={() => setShowAdvisor(false)} title="Analisis AI">
-            <div className="space-y-6 text-center">
-                <div className="w-24 h-24 bg-gradient-to-tr from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white mx-auto shadow-xl ring-4 ring-indigo-50 animate-bounce">
-                    <Bot size={48} />
-                </div>
-                {isAdvisorLoading ? (
-                    <div className="py-4"><Loader2 className="animate-spin mx-auto text-indigo-600" size={32} /><p className="text-slate-400 mt-2 font-medium">Lagi mikir...</p></div>
-                ) : (
-                    <div className="text-left bg-indigo-50/50 p-6 rounded-3xl border border-indigo-100 text-slate-700 leading-relaxed shadow-sm">
-                        {advisorAnalysis.split('\n').map((l,i) => <p key={i} className="mb-2">{l}</p>)}
-                    </div>
-                )}
-                <button onClick={() => setShowAdvisor(false)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold tracking-wide">Oke, Makasih</button>
+        <Modal isOpen={showAdvisor} onClose={() => setShowAdvisor(false)} title="AI Advisor">
+            <div className="space-y-4 text-center">
+                {isAdvisorLoading ? <Loader2 className="animate-spin mx-auto text-indigo-600"/> : <div className="text-left bg-indigo-50 p-4 rounded-xl text-sm">{advisorAnalysis}</div>}
+                <button onClick={() => setShowAdvisor(false)} className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold">Tutup</button>
             </div>
         </Modal>
+
+        {isProcessing && <div className="fixed inset-0 bg-white/80 z-[100] flex items-center justify-center flex-col"><Loader2 className="animate-spin text-indigo-600 mb-2" size={40}/><p className="font-bold text-slate-600">Memproses...</p></div>}
     </div>
   );
 }
