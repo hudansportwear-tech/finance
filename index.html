@@ -539,6 +539,27 @@ const dashboardStats = useMemo(() => {
           await addRecord('transactions', { date: new Date().toISOString().split('T')[0], description: 'Opname Kas', amount: Math.abs(diff), category: 'modal', paymentMethod: 'cash', type: diff > 0 ? 'income' : 'expense', notes: `Prev: ${formatCurrency(curr)}`, createdAt: new Date().toISOString(), isHidden: true });
       }
   };
+    const handleAdjustBank = async (e) => {
+      e.preventDefault();
+      const real = parseFloat(e.target.realBalance.value);
+      const curr = dashboardStats.nonCashBalance;
+      const diff = real - curr;
+      if (diff === 0) return setActiveModal(null);
+      if (confirm(`Saldo Bank di aplikasi: ${formatCurrency(curr)}\nSaldo Bank asli: ${formatCurrency(real)}\n\nBuat transaksi otomatis ${formatCurrency(Math.abs(diff))}?`)) {
+          await addRecord('transactions', { 
+              date: new Date().toISOString().split('T')[0], 
+              description: 'Opname Rekening Bank', 
+              amount: Math.abs(diff), 
+              category: 'modal', 
+              paymentMethod: 'noncash', // Ini bedanya, masuk ke Bank
+              type: diff > 0 ? 'income' : 'expense', 
+              notes: `Prev: ${formatCurrency(curr)}`, 
+              createdAt: new Date().toISOString(),
+              isHidden: true // Dibuat siluman seperti kas tunai
+          });
+          setActiveModal(null);
+      }
+  };
 
   const handleAdvisor = async () => {
     if (!apiKey) return alert("API Key Gemini belum diisi, Tuan.");
@@ -850,7 +871,10 @@ const reportData = useMemo(() => {
                                                     <p className="text-[10px] text-slate-400 uppercase tracking-wider">Non-Tunai</p>
                                                 </div>
                                             </div>
-                                            <span className="text-lg font-bold text-slate-800">{formatCurrency(dashboardStats.nonCashBalance)}</span>
+                                           <div className="text-right">
+    <span className="text-lg font-bold text-slate-800 block">{formatCurrency(dashboardStats.nonCashBalance)}</span>
+    <button onClick={() => setActiveModal('adjustBank')} className="text-[10px] text-purple-600 font-bold hover:underline hover:text-purple-800 transition">Koreksi?</button>
+</div>
                                         </div>
                                     </div>
                                 </div>
@@ -1212,6 +1236,13 @@ const reportData = useMemo(() => {
                 <button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl">Simpan</button>
             </form>
         </Modal>
+        <Modal isOpen={activeModal === 'adjustBank'} onClose={() => setActiveModal(null)} title="Opname Rekening Bank">
+    <form onSubmit={handleAdjustBank} className="space-y-4">
+        <div className="bg-purple-50 p-4 rounded-xl text-sm text-purple-800">Saldo Aktual: Berapa uang di Rekening Bank sekarang?</div>
+        <input name="realBalance" type="number" className="w-full border rounded-xl p-3 text-lg font-bold" placeholder="0" required />
+        <button type="submit" className="w-full bg-purple-600 text-white font-bold py-3 rounded-xl">Simpan</button>
+    </form>
+</Modal>
 
         <Modal isOpen={activeModal === 'product'} onClose={() => setActiveModal(null)} title="Produk">
              <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.target); const data = { name: fd.get('name'), sku: fd.get('sku'), category: fd.get('category'), price: parseFloat(fd.get('price')), cost: parseFloat(fd.get('cost')), stock: parseInt(fd.get('stock')) }; if(editData) updateRecord('products', editData.id, data); else addRecord('products', data); }} className="space-y-4">
@@ -1262,4 +1293,5 @@ root.render(<App />);
     </script>
 </body>
 </html>
+
 
