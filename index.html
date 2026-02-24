@@ -460,6 +460,7 @@ function App() {
   /* --- OPTIMIZATION (MEMOIZATION) --- */
   const filteredTransactions = useMemo(() => {
       return transactions.filter(t => {
+          if (t.isHidden) return false;
           if (transTab === 'all') return true;
           if (transTab === 'modal') return t.category === 'modal';
           if (transTab === 'sales') return t.type === 'income' && t.category !== 'modal';
@@ -535,7 +536,7 @@ const dashboardStats = useMemo(() => {
       const diff = real - curr;
       if (diff === 0) return setActiveModal(null);
       if (confirm(`Saldo di aplikasi: ${formatCurrency(curr)}\nSaldo fisik: ${formatCurrency(real)}\n\nBuat transaksi otomatis ${formatCurrency(Math.abs(diff))}?`)) {
-          await addRecord('transactions', { date: new Date().toISOString().split('T')[0], description: 'Opname Kas', amount: Math.abs(diff), category: 'modal', paymentMethod: 'cash', type: diff > 0 ? 'income' : 'expense', notes: `Prev: ${formatCurrency(curr)}`, createdAt: new Date().toISOString() });
+          await addRecord('transactions', { date: new Date().toISOString().split('T')[0], description: 'Opname Kas', amount: Math.abs(diff), category: 'modal', paymentMethod: 'cash', type: diff > 0 ? 'income' : 'expense', notes: `Prev: ${formatCurrency(curr)}`, createdAt: new Date().toISOString(), isHidden: true });
       }
   };
 
@@ -863,7 +864,7 @@ const reportData = useMemo(() => {
                                 <div className="flex-1 overflow-hidden">
                                     {transactions.length > 0 ? (
                                         <div className="space-y-4">
-                                            {transactions.slice(0, 4).map(t => (
+                                            {transactions.filter(t => !t.isHidden).slice(0, 4).map(t => (
                                                 <div key={t.id} className="flex items-center justify-between group">
                                                     <div className="flex items-center gap-4">
                                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm ${t.type==='income'?'bg-emerald-500':t.type==='expense'?'bg-rose-500':'bg-blue-500'}`}>
@@ -1261,3 +1262,4 @@ root.render(<App />);
     </script>
 </body>
 </html>
+
