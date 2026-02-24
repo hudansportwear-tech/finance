@@ -474,29 +474,24 @@ function App() {
   }, [filteredTransactions, currentPage, itemsPerPage]);
 
 const dashboardStats = useMemo(() => {
-    let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0;
+    let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0, modal = 0; // Tambah variabel modal
     transactions.forEach(t => {
-      if (t.status === 'unpaid' || t.status === 'recorded') return; // Skip unpaid and recorded/archive
+      if (t.status === 'unpaid' || t.status === 'recorded') return;
       const amt = parseFloat(t.amount) || 0;
       
       if (t.type === 'income') { 
-          // Cek kalau bukan modal, baru masuk ke kotak Pemasukan
-          if (t.category !== 'modal') {
-              income += amt; 
+          if (t.category === 'modal') {
+              modal += amt; // Hitung khusus modal
+          } else {
+              income += amt; // Hitung jualan murni
           }
-          // Saldo kas/bank tetap bertambah untuk semua income (termasuk modal)
           t.paymentMethod === 'cash' ? cashBalance += amt : nonCashBalance += amt; 
       }
-      else if (t.type === 'expense') { 
-          expense += amt; 
-          t.paymentMethod === 'cash' ? cashBalance -= amt : nonCashBalance -= amt; 
-      }
-      else if (t.type === 'transfer') { 
-          if (t.transferType === 'bank_to_cash') { cashBalance += amt; nonCashBalance -= amt; } 
-          else { cashBalance -= amt; nonCashBalance += amt; } 
-      }
+      else if (t.type === 'expense') { expense += amt; t.paymentMethod === 'cash' ? cashBalance -= amt : nonCashBalance -= amt; }
+      else if (t.type === 'transfer') { if (t.transferType === 'bank_to_cash') { cashBalance += amt; nonCashBalance -= amt; } else { cashBalance -= amt; nonCashBalance += amt; } }
     });
-    return { income, expense, balance: cashBalance + nonCashBalance, cashBalance, nonCashBalance, totalAssets: assets.reduce((s,a)=>s+(parseFloat(a.value)||0),0), totalReceivables: receivables.filter(r=>r.status==='pending').reduce((s,r)=>s+(parseFloat(r.amount)||0),0) };
+    // Jangan lupa return modal-nya
+    return { income, expense, modal, balance: cashBalance + nonCashBalance, cashBalance, nonCashBalance, totalAssets: assets.reduce((s,a)=>s+(parseFloat(a.value)||0),0), totalReceivables: receivables.filter(r=>r.status==='pending').reduce((s,r)=>s+(parseFloat(r.amount)||0),0) };
   }, [transactions, assets, receivables]);
 
   /* --- CRUD & LOGIC --- */
@@ -797,23 +792,32 @@ const reportData = useMemo(() => {
                                 </div>
                             </div>
 
-                            {/* MINI STATS */}
-                            <div className="space-y-6 flex flex-col">
-                                <div className="flex-1 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl"><ArrowDownRight size={24}/></div>
-                                        <span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">PEMASUKAN</span>
-                                    </div>
-                                    <h3 className="text-2xl font-bold text-slate-800">{formatCurrency(dashboardStats.income)}</h3>
-                                </div>
-                                <div className="flex-1 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl"><ArrowUpRight size={24}/></div>
-                                        <span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">PENGELUARAN</span>
-                                    </div>
-                                    <h3 className="text-2xl font-bold text-slate-800">{formatCurrency(dashboardStats.expense)}</h3>
-                                </div>
-                            </div>
+{/* MINI STATS */}
+<div className="space-y-4 flex flex-col h-full justify-between">
+    <div className="flex-1 bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
+        <div className="flex justify-between items-start mb-2">
+            <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-2xl"><ArrowDownRight size={20}/></div>
+            <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">PEMASUKAN</span>
+        </div>
+        <h3 className="text-xl font-bold text-slate-800">{formatCurrency(dashboardStats.income)}</h3>
+    </div>
+    
+    <div className="flex-1 bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
+        <div className="flex justify-between items-start mb-2">
+            <div className="p-2.5 bg-rose-50 text-rose-600 rounded-2xl"><ArrowUpRight size={20}/></div>
+            <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">PENGELUARAN</span>
+        </div>
+        <h3 className="text-xl font-bold text-slate-800">{formatCurrency(dashboardStats.expense)}</h3>
+    </div>
+
+    <div className="flex-1 bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
+        <div className="flex justify-between items-start mb-2">
+            <div className="p-2.5 bg-blue-50 text-blue-600 rounded-2xl"><Wallet size={20}/></div>
+            <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-lg">MODAL MASUK</span>
+        </div>
+        <h3 className="text-xl font-bold text-slate-800">{formatCurrency(dashboardStats.modal)}</h3>
+    </div>
+</div>
                         </div>
 
                         {/* SECOND ROW */}
@@ -1257,4 +1261,3 @@ root.render(<App />);
     </script>
 </body>
 </html>
-
