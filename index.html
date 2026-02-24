@@ -473,14 +473,28 @@ function App() {
       return filteredTransactions.slice((currentPage-1)*itemsPerPage, currentPage*itemsPerPage);
   }, [filteredTransactions, currentPage, itemsPerPage]);
 
-  const dashboardStats = useMemo(() => {
+const dashboardStats = useMemo(() => {
     let income = 0, expense = 0, cashBalance = 0, nonCashBalance = 0;
     transactions.forEach(t => {
       if (t.status === 'unpaid' || t.status === 'recorded') return; // Skip unpaid and recorded/archive
       const amt = parseFloat(t.amount) || 0;
-      if (t.type === 'income') { income += amt; t.paymentMethod === 'cash' ? cashBalance += amt : nonCashBalance += amt; }
-      else if (t.type === 'expense') { expense += amt; t.paymentMethod === 'cash' ? cashBalance -= amt : nonCashBalance -= amt; }
-      else if (t.type === 'transfer') { if (t.transferType === 'bank_to_cash') { cashBalance += amt; nonCashBalance -= amt; } else { cashBalance -= amt; nonCashBalance += amt; } }
+      
+      if (t.type === 'income') { 
+          // Cek kalau bukan modal, baru masuk ke kotak Pemasukan
+          if (t.category !== 'modal') {
+              income += amt; 
+          }
+          // Saldo kas/bank tetap bertambah untuk semua income (termasuk modal)
+          t.paymentMethod === 'cash' ? cashBalance += amt : nonCashBalance += amt; 
+      }
+      else if (t.type === 'expense') { 
+          expense += amt; 
+          t.paymentMethod === 'cash' ? cashBalance -= amt : nonCashBalance -= amt; 
+      }
+      else if (t.type === 'transfer') { 
+          if (t.transferType === 'bank_to_cash') { cashBalance += amt; nonCashBalance -= amt; } 
+          else { cashBalance -= amt; nonCashBalance += amt; } 
+      }
     });
     return { income, expense, balance: cashBalance + nonCashBalance, cashBalance, nonCashBalance, totalAssets: assets.reduce((s,a)=>s+(parseFloat(a.value)||0),0), totalReceivables: receivables.filter(r=>r.status==='pending').reduce((s,r)=>s+(parseFloat(r.amount)||0),0) };
   }, [transactions, assets, receivables]);
@@ -538,14 +552,17 @@ function App() {
   };
 
   // Report Calculation
-  const reportData = useMemo(() => {
+const reportData = useMemo(() => {
     if (!reportFilter.startDate || !reportFilter.endDate) return null;
     const start = new Date(reportFilter.startDate);
     const end = new Date(reportFilter.endDate);
     end.setHours(23, 59, 59, 999); 
     const filtered = transactions.filter(t => { const tDate = new Date(t.date); return tDate >= start && tDate <= end; });
-    const income = filtered.filter(t => t.type === 'income' && t.status !== 'unpaid' && t.status !== 'recorded').reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
+    
+    // Modal tidak ikut dihitung di total Pemasukan Laporan
+    const income = filtered.filter(t => t.type === 'income' && t.category !== 'modal' && t.status !== 'unpaid' && t.status !== 'recorded').reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
     const expense = filtered.filter(t => t.type === 'expense').reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
+    
     return { transactions: filtered, income, expense, balance: income - expense };
   }, [transactions, reportFilter]);
 
@@ -772,6 +789,7 @@ function App() {
                                         <button onClick={() => {setEditData(null); setActiveModal('income')}} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-3 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2">
                                             <ArrowDownRight size={18}/> Masuk
                                         </button>
+                                        <button onClick={() => {setEditData(null); setActiveModal('modal')}} className="px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-lg font-bold text-xs flex items-center gap-2"><Wallet size={18}/> Modal Awal</button>
                                         <button onClick={() => {setEditData(null); setActiveModal('expense')}} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white px-4 py-3 rounded-xl font-bold text-sm transition shadow-lg shadow-rose-900/20 flex items-center justify-center gap-2">
                                             <ArrowUpRight size={18}/> Keluar
                                         </button>
@@ -1239,3 +1257,4 @@ root.render(<App />);
     </script>
 </body>
 </html>
+
