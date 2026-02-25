@@ -572,7 +572,19 @@ const dashboardStats = useMemo(() => {
           setActiveModal(null);
       }
   };
-
+const handleFinishProduction = async (prod) => {
+      if (!confirm(`Baju dari ${prod.vendorName} sudah masuk gudang?\nSistem akan otomatis menambah stok ${prod.itemName} sebanyak ${prod.qty} pcs.`)) return;
+      
+      // Ubah status vendor jadi Selesai
+      await updateRecord('productions', prod.id, {status: 'Selesai'});
+      
+      // Otomatis tambah stok siap jual di gudang
+      if (prod.productId) {
+          await updateDoc(getDocRef('products', prod.productId), {
+              stock: increment(prod.qty)
+          });
+      }
+  };
   const handleAdvisor = async () => {
     if (!apiKey) return alert("API Key Gemini belum diisi, Tuan.");
     setShowAdvisor(true); setAdvisorAnalysis(''); setIsAdvisorLoading(true);
@@ -1076,38 +1088,53 @@ const reportData = useMemo(() => {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {products.filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase())).map(p => (
-                                <div key={p.id} className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm hover:shadow-lg transition-shadow group flex flex-col h-full">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="bg-indigo-50 text-indigo-600 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase">{p.category || 'Umum'}</div>
-                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button onClick={() => {setEditData(p); setActiveModal('product')}} className="p-2 hover:bg-indigo-50 rounded-lg"><Edit2 size={14} className="text-slate-400"/></button>
-                                            <button onClick={() => deleteRecord('products', p.id)} className="p-2 hover:bg-rose-50 rounded-lg"><Trash2 size={14} className="text-slate-400"/></button>
-                                        </div>
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="font-bold text-lg text-slate-800 leading-tight mb-1">{p.name}</h4>
-                                        <p className="text-xs text-slate-400 font-mono bg-slate-50 inline-block px-1.5 rounded">{p.sku || 'NO-SKU'}</p>
-                                    </div>
-                                    
-                                    {/* BAGIAN STOK BARU (Siap, Terjual, Gratis) */}
-                                    <div className="mt-4 pt-4 border-t border-slate-50 grid grid-cols-3 gap-2">
-                                        <div className="text-center bg-slate-50 rounded-xl p-2">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Siap</p>
-                                            <p className={`text-lg font-black ${p.stock<=5?'text-rose-600':'text-emerald-600'}`}>{p.stock || 0}</p>
-                                        </div>
-                                        <div className="text-center bg-indigo-50 rounded-xl p-2">
-                                            <p className="text-[10px] font-bold text-indigo-400 uppercase">Terjual</p>
-                                            <p className="text-lg font-black text-indigo-600">{p.sold || 0}</p>
-                                        </div>
-                                        <div className="text-center bg-amber-50 rounded-xl p-2 cursor-pointer hover:bg-amber-100 transition" onClick={() => {setEditData(p); setActiveModal('freeStock')}} title="Klik untuk catat stok gratis/rusak">
-                                            <p className="text-[10px] font-bold text-amber-500 uppercase">Gratis</p>
-                                            <p className="text-lg font-black text-amber-600">{p.free || 0}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+    {products.filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase())).map(p => (
+        <div key={p.id} className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm hover:shadow-lg transition-shadow group flex flex-col h-full">
+            <div className="flex justify-between items-start mb-4">
+                <div className="bg-indigo-50 text-indigo-600 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase">{p.category || 'Umum'}</div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => {setEditData(p); setActiveModal('product')}} className="p-2 hover:bg-indigo-50 rounded-lg"><Edit2 size={14} className="text-slate-400"/></button>
+                    <button onClick={() => deleteRecord('products', p.id)} className="p-2 hover:bg-rose-50 rounded-lg"><Trash2 size={14} className="text-slate-400"/></button>
+                </div>
+            </div>
+            <div className="flex-1">
+                <h4 className="font-bold text-lg text-slate-800 leading-tight mb-1">{p.name}</h4>
+                <p className="text-xs text-slate-400 font-mono bg-slate-50 inline-block px-1.5 rounded">{p.sku || 'NO-SKU'}</p>
+            </div>
+            
+            {/* BAGIAN STOK BARU (Siap, Terjual, Gratis) */}
+            <div className="mt-4 pt-4 border-t border-slate-50 grid grid-cols-3 gap-2">
+                <div className="text-center bg-slate-50 rounded-xl p-2">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Siap</p>
+                    <p className={`text-lg font-black ${p.stock<=5?'text-rose-600':'text-emerald-600'}`}>{p.stock || 0}</p>
+                </div>
+                <div className="text-center bg-indigo-50 rounded-xl p-2">
+                    <p className="text-[10px] font-bold text-indigo-400 uppercase">Terjual</p>
+                    <p className="text-lg font-black text-indigo-600">{p.sold || 0}</p>
+                </div>
+                <div className="text-center bg-amber-50 rounded-xl p-2 cursor-pointer hover:bg-amber-100 transition" onClick={() => {setEditData(p); setActiveModal('freeStock')}} title="Klik untuk catat stok gratis/rusak">
+                    <p className="text-[10px] font-bold text-amber-500 uppercase">Gratis</p>
+                    <p className="text-lg font-black text-amber-600">{p.free || 0}</p>
+                </div>
+            </div>
+
+            {/* RIWAYAT VENDOR (Sudah dimasukkan di sini) */}
+            <div className="mt-4 pt-3 border-t border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 flex items-center gap-1"><Target size={10}/> Riwayat Makloon (Selesai)</p>
+                <div className="max-h-16 overflow-y-auto space-y-1.5 pr-1 scrollbar-hide">
+                    {productions.filter(pr => pr.productId === p.id && pr.status === 'Selesai').length > 0 ? 
+                        productions.filter(pr => pr.productId === p.id && pr.status === 'Selesai').map(pr => (
+                            <div key={pr.id} className="flex justify-between items-center text-[10px] bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100">
+                                <span className="font-bold text-slate-600 truncate">{pr.vendorName}</span>
+                                <span className="text-emerald-600 font-bold bg-emerald-100 px-1.5 rounded">+{pr.qty}</span>
+                            </div>
+                        ))
+                    : <p className="text-[10px] text-slate-400 italic">Belum ada riwayat.</p>}
+                </div>
+            </div>
+        </div>
+    ))}
+</div>
 
                         {/* TABEL PRODUKSI VENDOR */}
                         <div className="mt-12">
@@ -1136,7 +1163,7 @@ const reportData = useMemo(() => {
                                                 </td>
                                                 <td className="px-6 py-4 text-right">
                                                     {prod.status !== 'Selesai' && (
-                                                        <button onClick={() => updateRecord('productions', prod.id, {status: 'Selesai'})} className="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg mr-2 hover:bg-emerald-100">Tandai Selesai</button>
+                                                        <button onClick={() => handleFinishProduction(prod)} className="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg mr-2 hover:bg-emerald-100">Tandai Selesai Masuk Gudang</button>
                                                     )}
                                                     <button onClick={() => deleteRecord('productions', prod.id)} className="p-2 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-lg"><Trash2 size={16}/></button>
                                                 </td>
@@ -1365,17 +1392,28 @@ const reportData = useMemo(() => {
     <form onSubmit={(e) => { 
         e.preventDefault(); 
         const fd = new FormData(e.target); 
+        const prodId = fd.get('productId');
+        const selectedProd = products.find(p => p.id === prodId);
+
         addRecord('productions', { 
             vendorName: fd.get('vendorName'), 
-            itemName: fd.get('itemName'), 
+            productId: prodId,
+            itemName: selectedProd ? selectedProd.name : 'Produk Dihapus', 
             qty: parseInt(fd.get('qty')), 
             startDate: fd.get('startDate'), 
             status: 'Proses' 
         }); 
-    setActiveModal(null);
+        setActiveModal(null);
     }} className="space-y-4">
         <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Vendor (Makloon/Penjahit)</label><input name="vendorName" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" required placeholder="Contoh: Konveksi Kang Asep"/></div>
-        <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Barang yang Dibuat</label><input name="itemName" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" required placeholder="Contoh: Jersey Home Persib (L)"/></div>
+        
+        <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pilih Produk</label>
+            <select name="productId" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" required>
+                <option value="">-- Pilih Barang yang Dibuat --</option>
+                {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stok: {p.stock || 0})</option>)}
+            </select>
+        </div>
+
         <div className="grid grid-cols-2 gap-4">
             <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Jumlah (Pcs)</label><input name="qty" type="number" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" required min="1"/></div>
             <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tanggal Mulai</label><input name="startDate" type="date" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none" required defaultValue={new Date().toISOString().split('T')[0]}/></div>
@@ -1394,6 +1432,7 @@ root.render(<App />);
     </script>
 </body>
 </html>
+
 
 
 
