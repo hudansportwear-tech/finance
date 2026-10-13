@@ -246,11 +246,11 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
         transferType: 'bank_to_cash', 
         notes: '' 
     });
-    const [status, setStatus] = useState(initialData?.status || 'paid'); // Status State
+    const [status, setStatus] = useState(initialData?.status || 'paid');
     const [useStock, setUseStock] = useState(subtype === 'stock_sale');
     const [isGiveaway, setIsGiveaway] = useState(false);
     const [selProd, setSelProd] = useState('');
-    const [selSize, setSelSize] = useState(''); // State untuk Ukuran
+    const [selSize, setSelSize] = useState('');
     const [qty, setQty] = useState(1);
     const [magicPrompt, setMagicPrompt] = useState('');
     const [isMagicLoading, setIsMagicLoading] = useState(false);
@@ -270,6 +270,7 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
 
     const handleProd = (pid) => {
         setSelProd(pid); 
+        setSelSize(''); // Reset ukuran jika ganti barang
         const p = products.find(x => x.id === pid);
         if (p) setForm(prev => ({...prev, description: isGiveaway ? `GRATIS: ${p.name} (${qty} pcs)` : `Penjualan: ${p.name} (${qty} pcs)`, amount: isGiveaway ? 0 : p.price * qty}));
     };
@@ -308,13 +309,15 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
         let stockUp = null;
         if (type === 'income' && useStock && selProd) {
             const p = products.find(x => x.id === selProd);
-            if (!selSize) return alert("Pilih ukurannya dulu, Tuan!");
+            const isNoSize = p.hasSize === false;
+
+            if (!isNoSize && !selSize) return alert("Pilih ukurannya dulu, Tuan!");
             
-            const currentStockSize = p[`stock${selSize}`] || 0;
-            if (currentStockSize < qty) return alert(`Stok ukuran ${selSize} kurang! (Sisa: ${currentStockSize})`);
+            const currentStockSize = isNoSize ? p.stock : (p[`stock${selSize}`] || 0);
+            if (currentStockSize < qty) return alert(`Stok ${isNoSize ? '' : 'ukuran ' + selSize} kurang! (Sisa: ${currentStockSize})`);
             
-            data = {...data, productId: selProd, quantity: qty, size: selSize, isStockSale: true};
-            stockUp = {id: selProd, stockChange: -qty, size: selSize, soldChange: isGiveaway ? 0 : qty, freeChange: isGiveaway ? qty : 0};
+            data = {...data, productId: selProd, quantity: qty, size: isNoSize ? null : selSize, isStockSale: true};
+            stockUp = {id: selProd, stockChange: -qty, size: isNoSize ? null : selSize, soldChange: isGiveaway ? 0 : qty, freeChange: isGiveaway ? qty : 0};
         }
 
         let autoWithdrawal = null;
@@ -351,7 +354,6 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
                 </div>
             )}
 
-            {/* STATUS PEMBAYARAN TOGGLE */}
             {type === 'income' && (
                 <div className="bg-slate-50 border border-slate-200 p-1.5 rounded-xl flex gap-1">
                     <button type="button" onClick={()=>setStatus('paid')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${status==='paid'?'bg-emerald-500 text-white shadow-md':'text-slate-500 hover:bg-white'}`}>
@@ -390,15 +392,24 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
 
                     {useStock && (
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 animate-enter">
-                            <div className="md:col-span-2"><select className={inputClass} value={selProd} onChange={e => handleProd(e.target.value)} required><option value="">Pilih Produk...</option>{products.map(p => <option key={p.id} value={p.id} disabled={p.stock <= 0}>{p.name} (Total Stok: {p.stock})</option>)}</select></div>
-                            <div>
-                                <select className={inputClass} value={selSize} onChange={e => setSelSize(e.target.value)} required disabled={!selProd}>
-                                    <option value="">Ukuran...</option>
-                                    <option value="S">S ({selProd ? (products.find(p=>p.id===selProd)?.stockS || 0) : 0})</option>
-                                    <option value="M">M ({selProd ? (products.find(p=>p.id===selProd)?.stockM || 0) : 0})</option>
-                                    <option value="L">L ({selProd ? (products.find(p=>p.id===selProd)?.stockL || 0) : 0})</option>
-                                    <option value="XL">XL ({selProd ? (products.find(p=>p.id===selProd)?.stockXL || 0) : 0})</option>
+                            <div className="md:col-span-2">
+                                <select className={inputClass} value={selProd} onChange={e => handleProd(e.target.value)} required>
+                                    <option value="">Pilih Produk...</option>
+                                    {products.map(p => <option key={p.id} value={p.id} disabled={p.stock <= 0}>{p.name} (Total Stok: {p.stock})</option>)}
                                 </select>
+                            </div>
+                            <div>
+                                {selProd && products.find(p => p.id === selProd)?.hasSize === false ? (
+                                    <input type="text" className={`${inputClass} bg-slate-100 text-slate-400 font-bold`} value="Tanpa Ukuran" readOnly />
+                                ) : (
+                                    <select className={inputClass} value={selSize} onChange={e => setSelSize(e.target.value)} required={selProd && products.find(p => p.id === selProd)?.hasSize !== false} disabled={!selProd}>
+                                        <option value="">Ukuran...</option>
+                                        <option value="S">S ({selProd ? (products.find(p=>p.id===selProd)?.stockS || 0) : 0})</option>
+                                        <option value="M">M ({selProd ? (products.find(p=>p.id===selProd)?.stockM || 0) : 0})</option>
+                                        <option value="L">L ({selProd ? (products.find(p=>p.id===selProd)?.stockL || 0) : 0})</option>
+                                        <option value="XL">XL ({selProd ? (products.find(p=>p.id===selProd)?.stockXL || 0) : 0})</option>
+                                    </select>
+                                )}
                             </div>
                             <div><input type="number" min="1" className={inputClass} value={qty} onChange={e => handleQty(e.target.value)} required placeholder="Qty" /></div>
                         </div>
@@ -434,7 +445,8 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
         </form>
     );
 };
-        // --- PRODUCT FORM COMPONENT ---
+
+// --- PRODUCT FORM COMPONENT ---
 const ProductForm = ({ initialData, onSave, onCancel }) => {
     // State untuk menentukan apakah barang ini punya ukuran baju atau tidak
     const [hasSize, setHasSize] = useState(initialData ? (initialData.hasSize !== false) : true);
@@ -538,7 +550,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [importRecordedOnly, setImportRecordedOnly] = useState(false); // State untuk checkbox import
+  const [importRecordedOnly, setImportRecordedOnly] = useState(false); 
   
   // Data State
   const [transactions, setTransactions] = useState([]);
@@ -553,6 +565,10 @@ function App() {
   const [editData, setEditData] = useState(null);
   const [prodSearch, setProdSearch] = useState('');
   
+  // Filter States
+  const [transTab, setTransTab] = useState('all');
+  const [warehouseFilter, setWarehouseFilter] = useState('Semua'); // NEW: State untuk Filter Gudang
+  
   // AI
   const [showAdvisor, setShowAdvisor] = useState(false);
   const [advisorAnalysis, setAdvisorAnalysis] = useState('');
@@ -564,7 +580,6 @@ function App() {
   const [reportFilter, setReportFilter] = useState({ startDate: '', endDate: '', category: 'all' });
   const [importTypeState, setImportTypeState] = useState('transactions');
   const [importContext, setImportContext] = useState('all'); 
-  const [transTab, setTransTab] = useState('all');
 
   /* --- AUTH & INIT --- */
   useEffect(() => {
@@ -1242,13 +1257,33 @@ function App() {
                             </div>
                         </div>
                         
-                        <div className="relative group">
-                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><Search className="text-slate-400" size={20}/></div>
-                            <input type="text" placeholder="Cari barang..." className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 shadow-sm rounded-2xl focus:ring-4 focus:ring-indigo-500/10 font-medium" value={prodSearch} onChange={e => setProdSearch(e.target.value)}/>
+                        {/* --- TAB FILTER GUDANG BARU --- */}
+                        <div className="flex flex-col lg:flex-row justify-between gap-4 items-start lg:items-center mt-2 mb-6">
+                            <div className="flex flex-wrap gap-2">
+                                {[
+                                    {id: 'Semua', label: 'Semua', icon: LayoutDashboard},
+                                    {id: 'Produk Jadi', label: 'Produk Jadi', icon: ShoppingCart},
+                                    {id: 'Barang Setengah Jadi', label: 'WIP / 50%', icon: Activity},
+                                    {id: 'Asesoris & Packaging', label: 'Asesoris', icon: Gift},
+                                    {id: 'Bahan Baku', label: 'Bahan Baku', icon: Archive}
+                                ].map(tab => (
+                                    <button key={tab.id} onClick={() => setWarehouseFilter(tab.id)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border ${warehouseFilter === tab.id ? 'bg-slate-800 text-white border-slate-800 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                                        <tab.icon size={14} className={warehouseFilter === tab.id ? 'text-white' : 'text-slate-400'}/> {tab.label}
+                                    </button>
+                                ))}
+                            </div>
+                            
+                            <div className="relative group w-full lg:w-72 flex-shrink-0">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="text-slate-400" size={16}/></div>
+                                <input type="text" placeholder="Cari barang..." className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 shadow-sm rounded-xl focus:ring-2 focus:ring-indigo-500/20 font-medium text-sm outline-none" value={prodSearch} onChange={e => setProdSearch(e.target.value)}/>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {products.filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase())).map(p => {
+                            {products
+                                .filter(p => warehouseFilter === 'Semua' || (p.category || 'Produk Jadi') === warehouseFilter)
+                                .filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase()))
+                                .map(p => {
                                 const stats = productStats[p.id] || { sold: 0, given: 0 };
                                 return (
                                     <div key={p.id} className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm hover:shadow-xl transition-all group flex flex-col h-full relative overflow-hidden">
@@ -1256,34 +1291,34 @@ function App() {
                                         <div className="mb-4"><h4 className="font-bold text-lg text-slate-800 leading-tight mb-1">{p.name}</h4><p className="text-xs text-slate-500 font-medium flex items-center gap-1"><Truck size={12}/> {p.supplier || 'Vendor Umum'}</p></div>
                                         
                                         {/* DETAIL UKURAN STOK / STOK UMUM */}
-<div className="mb-4">
-    <p className="text-[10px] font-bold text-slate-400 mb-1">DETAIL STOK (Siap Pakai/Jual)</p>
-    {p.hasSize !== false ? (
-        <div className="grid grid-cols-4 gap-1 text-center">
-            <div className="bg-slate-50 border border-slate-100 rounded-lg p-1">
-                <span className="text-[9px] text-slate-500 font-bold block">S</span>
-                <span className="text-xs font-black text-slate-700">{p.stockS || 0}</span>
-            </div>
-            <div className="bg-slate-50 border border-slate-100 rounded-lg p-1">
-                <span className="text-[9px] text-slate-500 font-bold block">M</span>
-                <span className="text-xs font-black text-slate-700">{p.stockM || 0}</span>
-            </div>
-            <div className="bg-slate-50 border border-slate-100 rounded-lg p-1">
-                <span className="text-[9px] text-slate-500 font-bold block">L</span>
-                <span className="text-xs font-black text-slate-700">{p.stockL || 0}</span>
-            </div>
-            <div className="bg-slate-50 border border-slate-100 rounded-lg p-1">
-                <span className="text-[9px] text-slate-500 font-bold block">XL</span>
-                <span className="text-xs font-black text-slate-700">{p.stockXL || 0}</span>
-            </div>
-        </div>
-    ) : (
-        <div className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 flex items-center justify-center gap-2">
-            <span className="text-lg font-black text-slate-700">{p.stock || 0}</span>
-            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Pcs / Unit Tersedia</span>
-        </div>
-    )}
-</div>
+                                        <div className="mb-4">
+                                            <p className="text-[10px] font-bold text-slate-400 mb-1">DETAIL STOK (Siap Pakai/Jual)</p>
+                                            {p.hasSize !== false ? (
+                                                <div className="grid grid-cols-4 gap-1 text-center">
+                                                    <div className="bg-slate-50 border border-slate-100 rounded-lg p-1">
+                                                        <span className="text-[9px] text-slate-500 font-bold block">S</span>
+                                                        <span className="text-xs font-black text-slate-700">{p.stockS || 0}</span>
+                                                    </div>
+                                                    <div className="bg-slate-50 border border-slate-100 rounded-lg p-1">
+                                                        <span className="text-[9px] text-slate-500 font-bold block">M</span>
+                                                        <span className="text-xs font-black text-slate-700">{p.stockM || 0}</span>
+                                                    </div>
+                                                    <div className="bg-slate-50 border border-slate-100 rounded-lg p-1">
+                                                        <span className="text-[9px] text-slate-500 font-bold block">L</span>
+                                                        <span className="text-xs font-black text-slate-700">{p.stockL || 0}</span>
+                                                    </div>
+                                                    <div className="bg-slate-50 border border-slate-100 rounded-lg p-1">
+                                                        <span className="text-[9px] text-slate-500 font-bold block">XL</span>
+                                                        <span className="text-xs font-black text-slate-700">{p.stockXL || 0}</span>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 flex items-center justify-center gap-2">
+                                                    <span className="text-lg font-black text-slate-700">{p.stock || 0}</span>
+                                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Pcs / Unit Tersedia</span>
+                                                </div>
+                                            )}
+                                        </div>
 
                                         {/* BAGIAN STOK BARU (Siap Total, Terjual, BS, Gratis) */}
                                         <div className="mt-auto pt-4 border-t border-slate-100 grid grid-cols-4 gap-2">
@@ -1516,7 +1551,7 @@ function App() {
         <Modal isOpen={activeModal === 'adjustCash'} onClose={() => setActiveModal(null)} title="Opname Kas"><form onSubmit={handleAdjustCash} className="space-y-4"><div className="bg-amber-50 p-4 rounded-xl text-sm text-amber-800">Saldo Fisik: Berapa uang di laci sekarang?</div><input name="realBalance" type="number" className="w-full border rounded-xl p-3 text-lg font-bold" placeholder="0" /><button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl">Simpan</button></form></Modal>
         <Modal isOpen={activeModal === 'adjustBank'} onClose={() => setActiveModal(null)} title="Opname Bank"><form onSubmit={handleAdjustBank} className="space-y-4"><div className="bg-purple-50 p-4 rounded-xl text-sm text-purple-800">Saldo Aktual: Berapa uang di Rekening?</div><input name="realBalance" type="number" className="w-full border rounded-xl p-3 text-lg font-bold" placeholder="0" required /><button className="w-full bg-purple-600 text-white font-bold py-3 rounded-xl">Simpan</button></form></Modal>
 
-       <Modal isOpen={activeModal === 'product'} onClose={() => setActiveModal(null)} title={editData ? "Edit Data Barang" : "Barang / Material Baru"}>
+        <Modal isOpen={activeModal === 'product'} onClose={() => setActiveModal(null)} title={editData ? "Edit Data Barang" : "Barang / Material Baru"}>
             <ProductForm 
                 initialData={editData} 
                 onSave={(data, id) => {
@@ -1546,30 +1581,40 @@ function App() {
             <form onSubmit={(e) => { 
                 e.preventDefault(); 
                 const q = parseInt(e.target.qty.value); 
-                const s = e.target.size.value;
-                if(!s) return alert("Pilih ukurannya Tuan!");
-                const currentSizeStock = editData[`stock${s}`] || 0;
+                const hasSize = editData?.hasSize !== false;
+                let s = null;
 
-                if(currentSizeStock < q) return alert(`Stok ukuran ${s} tidak cukup! (Sisa: ${currentSizeStock})`);
+                if (hasSize) {
+                    s = e.target.size.value;
+                    if(!s) return alert("Pilih ukurannya Tuan!");
+                    const currentSizeStock = editData[`stock${s}`] || 0;
+                    if(currentSizeStock < q) return alert(`Stok ukuran ${s} tidak cukup! (Sisa: ${currentSizeStock})`);
+                } else {
+                    if (editData.stock < q) return alert(`Stok tidak cukup! (Sisa: ${editData.stock})`);
+                }
                 
                 const updates = { 
                     stock: increment(-q), 
                     free: increment(q) 
                 };
-                updates[`stock${s}`] = increment(-q);
+                if(hasSize) updates[`stock${s}`] = increment(-q);
 
                 updateRecord('products', editData.id, updates); 
                 setActiveModal(null);
             }} className="space-y-4">
                 <div className="bg-amber-50 p-4 rounded-xl text-sm text-amber-800">Barang ini keluar gratis untuk apa? (Endorse/Sampel/Dll)</div>
                 <div className="grid grid-cols-2 gap-3">
-                    <select name="size" className="w-full border rounded-xl p-3 text-sm font-bold text-slate-700 outline-none" required>
-                        <option value="">Pilih Ukuran...</option>
-                        <option value="S">S (Sisa {editData?.stockS || 0})</option>
-                        <option value="M">M (Sisa {editData?.stockM || 0})</option>
-                        <option value="L">L (Sisa {editData?.stockL || 0})</option>
-                        <option value="XL">XL (Sisa {editData?.stockXL || 0})</option>
-                    </select>
+                    {editData?.hasSize !== false ? (
+                        <select name="size" className="w-full border rounded-xl p-3 text-sm font-bold text-slate-700 outline-none" required>
+                            <option value="">Pilih Ukuran...</option>
+                            <option value="S">S (Sisa {editData?.stockS || 0})</option>
+                            <option value="M">M (Sisa {editData?.stockM || 0})</option>
+                            <option value="L">L (Sisa {editData?.stockL || 0})</option>
+                            <option value="XL">XL (Sisa {editData?.stockXL || 0})</option>
+                        </select>
+                    ) : (
+                        <input type="text" className="w-full border rounded-xl p-3 text-sm font-bold text-slate-400 bg-slate-50 outline-none" value="Tanpa Ukuran" readOnly />
+                    )}
                     <input name="qty" type="number" min="1" className="w-full border rounded-xl p-3 text-lg font-bold outline-none" placeholder="Jml (Pcs)" required />
                 </div>
                 <button type="submit" className="w-full bg-amber-600 text-white font-bold py-3 rounded-xl shadow-md">Potong Stok</button>
@@ -1582,12 +1627,15 @@ function App() {
                 const fd = new FormData(e.target); 
                 const prodId = fd.get('productId');
                 const selectedProd = products.find(p => p.id === prodId);
+                const hasSize = selectedProd?.hasSize !== false;
 
                 const qS = parseInt(fd.get('qtyS')) || 0;
                 const qM = parseInt(fd.get('qtyM')) || 0;
                 const qL = parseInt(fd.get('qtyL')) || 0;
                 const qXL = parseInt(fd.get('qtyXL')) || 0;
-                const totalQty = qS + qM + qL + qXL;
+                const qGen = parseInt(fd.get('qtyGeneral')) || 0;
+                
+                const totalQty = hasSize ? (qS + qM + qL + qXL) : qGen;
 
                 if(totalQty === 0) return alert("Jumlah barang tidak boleh nol!");
 
@@ -1621,12 +1669,17 @@ function App() {
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-3">Rincian Ukuran yang Dipesan</label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-3">Rincian Jumlah yang Dipesan</label>
                     <div className="grid grid-cols-4 gap-2">
                         <div><span className="text-[10px] text-slate-500 font-bold mb-1 block">S</span><input name="qtyS" type="number" min="0" className="w-full border p-2 rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-center" placeholder="0" defaultValue={editData?.qtyS || ''}/></div>
                         <div><span className="text-[10px] text-slate-500 font-bold mb-1 block">M</span><input name="qtyM" type="number" min="0" className="w-full border p-2 rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-center" placeholder="0" defaultValue={editData?.qtyM || ''}/></div>
                         <div><span className="text-[10px] text-slate-500 font-bold mb-1 block">L</span><input name="qtyL" type="number" min="0" className="w-full border p-2 rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-center" placeholder="0" defaultValue={editData?.qtyL || ''}/></div>
                         <div><span className="text-[10px] text-slate-500 font-bold mb-1 block">XL</span><input name="qtyXL" type="number" min="0" className="w-full border p-2 rounded-lg outline-none focus:ring-2 focus:ring-violet-500 text-center" placeholder="0" defaultValue={editData?.qtyXL || ''}/></div>
+                        
+                        <div className="col-span-4 mt-2 pt-2 border-t border-slate-200">
+                            <span className="text-[10px] text-slate-500 font-bold mb-1 block">ATAU TOTAL QTY (Khusus Asesoris / Tanpa Ukuran)</span>
+                            <input name="qtyGeneral" type="number" min="0" className="w-full border p-2 rounded-lg outline-none focus:ring-2 focus:ring-violet-500" placeholder="0" defaultValue={editData?.hasSize === false ? editData.qty : ''}/>
+                        </div>
                     </div>
                 </div>
 
