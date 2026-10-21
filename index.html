@@ -87,7 +87,7 @@ import {
   Plus, Trash2, Edit2, Download, Upload, Printer, X, FileSpreadsheet, File as FileIcon,
   ChevronLeft, ChevronRight, Package, ShoppingCart, Menu, ArrowUpRight, ArrowDownRight, Wallet, Search,
   Sparkles, Bot, Loader2, MoreHorizontal, ArrowRight, CreditCard, PieChart, Activity, Archive, Gift, Truck,
-  AlertTriangle, AlertCircle, Bell, Calculator
+  AlertTriangle, AlertCircle, Bell, Calculator, List
 } from 'lucide-react';
 
 /* --- FIREBASE CONFIGURATION --- */
@@ -560,6 +560,9 @@ function App() {
   const [targets, setTargets] = useState([]);
   const [products, setProducts] = useState([]);
   const [productions, setProductions] = useState([]);
+  
+  // NEW: State untuk Simulasi Modal / RAB Database
+  const [simulations, setSimulations] = useState([]);
 
   // UI State
   const [activeModal, setActiveModal] = useState(null);
@@ -570,7 +573,10 @@ function App() {
   const [transTab, setTransTab] = useState('all');
   const [warehouseFilter, setWarehouseFilter] = useState('Semua'); 
   
-  // Kalkulator Simulasi State
+  // Kalkulator Simulasi State (Form Data)
+  const [simView, setSimView] = useState('list'); // 'list' atau 'form'
+  const [simTitle, setSimTitle] = useState('');
+  const [currentSimId, setCurrentSimId] = useState(null);
   const [simItems, setSimItems] = useState([{ id: Date.now(), name: '', price: '', qty: 1 }]);
   const simTotal = simItems.reduce((acc, curr) => acc + (parseFloat(curr.price) || 0) * (parseInt(curr.qty) || 0), 0);
   
@@ -615,7 +621,9 @@ function App() {
         onSnapshot(collection(db, ...basePath, 'receivables'), s => setReceivables(s.docs.map(d => ({id:d.id, ...d.data()})))),
         onSnapshot(collection(db, ...basePath, 'targets'), s => setTargets(s.docs.map(d => ({id:d.id, ...d.data()})))),
         onSnapshot(collection(db, ...basePath, 'products'), s => setProducts(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => a.name.localeCompare(b.name)))),
-        onSnapshot(collection(db, ...basePath, 'productions'), s => setProductions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.startDate)-new Date(a.startDate))))
+        onSnapshot(collection(db, ...basePath, 'productions'), s => setProductions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.startDate)-new Date(a.startDate)))),
+        // Listener baru untuk simulasi/RAB
+        onSnapshot(collection(db, ...basePath, 'simulations'), s => setSimulations(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt))))
     ];
     return () => subs.forEach(unsub => unsub());
   }, [user]);
@@ -708,6 +716,70 @@ function App() {
       } 
       if (id) await updateRecord('transactions', id, data); 
       else await addRecord('transactions', data); 
+  };
+
+  // FUNGSI ARSIP SIMULASI RAB
+  const handleSaveSimulation = async () => {
+        if (!simTitle.trim()) return alert('Isi Judul Simulasi/RAB dulu, Tuan!');
+        const validItems = simItems.filter(i => i.name.trim() !== '');
+        if (validItems.length === 0) return alert('Kalkulator masih kosong, isi minimal 1 kebutuhan.');
+        
+        setIsProcessing(true);
+        const data = {
+            title: simTitle,
+            items: validItems,
+            total: simTotal
+        };
+
+        if (currentSimId) {
+            await updateRecord('simulations', currentSimId, data);
+        } else {
+            await addRecord('simulations', data);
+        }
+        setIsProcessing(false);
+        setSimView('list');
+  };
+
+  const openNewSimulation = () => {
+        setSimTitle('');
+        setSimItems([{ id: Date.now(), name: '', price: '', qty: 1 }]);
+        setCurrentSimId(null);
+        setSimView('form');
+  };
+
+  const openEditSimulation = (sim) => {
+        setSimTitle(sim.title);
+        setSimItems(sim.items);
+        setCurrentSimId(sim.id);
+        setSimView('form');
+  };
+
+  const exportSimulationData = (items, total, format, title) => {
+        const validItems = items.filter(i => i.name.trim() !== '');
+        if (validItems.length === 0) return alert("Simulasi kosong!");
+        
+        if (format === 'excel') {
+            const exportData = validItems.map((item, index) => ({
+                "No": index + 1,
+                "Nama Kebutuhan": item.name,
+                "Harga Satuan": parseFloat(item.price) || 0,
+                "Qty": parseInt(item.qty) || 0,
+                "Total (Rp)": (parseFloat(item.price) || 0) * (parseInt(item.qty) || 0)
+            }));
+            exportData.push({ "No": "", "Nama Kebutuhan": "TOTAL KESELURUHAN", "Harga Satuan": "", "Qty": "", "Total (Rp)": total });
+            exportToExcel(exportData, `RAB_${title.replace(/ /g,"_")}`);
+        } else if (format === 'pdf') {
+            const headers = ["No", "Nama Kebutuhan", "Harga Satuan", "Qty", "Total (Rp)"];
+            const pdfData = validItems.map((item, index) => [
+                index + 1,
+                item.name,
+                formatCurrency(item.price),
+                item.qty,
+                formatCurrency((parseFloat(item.price) || 0) * (parseInt(item.qty) || 0))
+            ]);
+            pdfData.push(["", "TOTAL KESELURUHAN", "", "", formatCurrency(total)]);
+            exportToPDF(headers, pdfData, `RAB - ${title}`);
+        }
   };
   
   const handlePayReceivable = async (r) => { 
@@ -949,7 +1021,7 @@ function App() {
                 <SidebarItem icon={Banknote} label="Transaksi" active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} />
                 <SidebarItem icon={Package} label="Gudang Stok" active={activeTab === 'warehouse'} onClick={() => setActiveTab('warehouse')} />
                 <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 mt-6">Analisis & Planning</p>
-                <SidebarItem icon={Calculator} label="Simulasi Modal" active={activeTab === 'simulation'} onClick={() => setActiveTab('simulation')} />
+                <SidebarItem icon={Calculator} label="Simulasi Modal" active={activeTab === 'simulation'} onClick={() => {setActiveTab('simulation'); setSimView('list');}} />
                 <SidebarItem icon={FileText} label="Laporan" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
                 <SidebarItem icon={Building2} label="Aset & Piutang" active={activeTab === 'assets'} onClick={() => setActiveTab('assets')} />
                 <SidebarItem icon={Target} label="Target Bisnis" active={activeTab === 'targets'} onClick={() => setActiveTab('targets')} />
@@ -1135,79 +1207,6 @@ function App() {
                                             <p className="text-sm">Belum ada transaksi.</p>
                                         </div>
                                     )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* --- SIMULASI MODAL (NEW) --- */}
-                {activeTab === 'simulation' && (
-                    <div className="space-y-8 animate-enter">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <div>
-                                <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Simulasi Modal</h2>
-                                <p className="text-slate-500 mt-1">Hitung estimasi kebutuhan dana produksi, restok, atau belanja baru.</p>
-                            </div>
-                            <button onClick={() => {if(confirm('Reset semua baris?')) setSimItems([{ id: Date.now(), name: '', price: '', qty: 1 }])}} className="px-4 py-2.5 bg-white text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm flex items-center gap-2 shadow-sm transition"><Archive size={16}/> Reset Kalkulator</button>
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                            <div className="lg:col-span-2 space-y-4">
-                                {simItems.map((item, index) => (
-                                    <div key={item.id} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4 items-end animate-enter relative group">
-                                        <div className="absolute -left-3 top-1/2 -translate-y-1/2 bg-slate-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow-md z-10">{index + 1}</div>
-                                        <div className="flex-1 w-full pl-2 md:pl-4">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Nama Kebutuhan</label>
-                                            <input type="text" placeholder="Cth: Kain Dri-fit 1 Roll" className="w-full border-b-2 border-slate-100 bg-slate-50 px-4 py-3 rounded-t-xl outline-none focus:bg-indigo-50/50 focus:border-indigo-400 font-bold text-slate-700 transition" value={item.name} onChange={(e) => { const newItems = [...simItems]; newItems[index].name = e.target.value; setSimItems(newItems); }} />
-                                        </div>
-                                        <div className="w-full md:w-44">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Harga Satuan (Rp)</label>
-                                            <input type="number" placeholder="0" className="w-full border-b-2 border-slate-100 bg-slate-50 px-4 py-3 rounded-t-xl outline-none focus:bg-indigo-50/50 focus:border-indigo-400 font-bold text-slate-700 transition" value={item.price} onChange={(e) => { const newItems = [...simItems]; newItems[index].price = e.target.value; setSimItems(newItems); }} />
-                                        </div>
-                                        <div className="w-full md:w-24">
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Qty</label>
-                                            <input type="number" min="1" className="w-full border-b-2 border-slate-100 bg-slate-50 px-4 py-3 rounded-t-xl outline-none focus:bg-indigo-50/50 focus:border-indigo-400 font-bold text-slate-700 text-center transition" value={item.qty} onChange={(e) => { const newItems = [...simItems]; newItems[index].qty = e.target.value; setSimItems(newItems); }} />
-                                        </div>
-                                        <button onClick={() => { if(simItems.length > 1) setSimItems(simItems.filter(i => i.id !== item.id)) }} className={`p-3.5 rounded-xl transition w-full md:w-auto flex justify-center ${simItems.length === 1 ? 'bg-slate-50 text-slate-300 cursor-not-allowed' : 'bg-rose-50 text-rose-500 hover:bg-rose-100 shadow-sm'}`} disabled={simItems.length === 1}><Trash2 size={18}/></button>
-                                    </div>
-                                ))}
-                                <button onClick={() => setSimItems([...simItems, { id: Date.now(), name: '', price: '', qty: 1 }])} className="w-full py-4 mt-2 border-2 border-dashed border-indigo-200 rounded-[1.5rem] text-indigo-600 font-bold bg-indigo-50/30 hover:bg-indigo-50 hover:border-indigo-400 transition flex items-center justify-center gap-2">
-                                    <Plus size={20}/> Tambah Baris Baru
-                                </button>
-                            </div>
-
-                            <div className="lg:col-span-1">
-                                <div className="bg-gradient-to-br from-indigo-900 to-slate-900 rounded-[2rem] p-8 text-white shadow-xl lg:sticky lg:top-24 border border-indigo-800/50">
-                                    <div className="flex justify-between items-center mb-6">
-                                        <h3 className="text-indigo-200 text-xs font-bold uppercase tracking-widest">Total Kebutuhan</h3>
-                                        <div className="p-2 bg-indigo-800 rounded-lg text-indigo-300"><Calculator size={20}/></div>
-                                    </div>
-                                    <div className="text-4xl font-black mb-8 tracking-tight">{formatCurrency(simTotal).replace('Rp', 'Rp ')}</div>
-                                    
-                                    <div className="space-y-4 pt-6 border-t border-indigo-800/50">
-                                        <div className="flex justify-between items-center text-sm bg-indigo-950/30 p-3 rounded-xl border border-indigo-800/30">
-                                            <span className="text-indigo-200 font-medium">Jenis Item</span>
-                                            <span className="font-black text-white">{simItems.filter(i => i.name || i.price).length} <span className="text-xs font-normal text-indigo-300">Macam</span></span>
-                                        </div>
-                                        <div className="flex justify-between items-center text-sm bg-indigo-950/30 p-3 rounded-xl border border-indigo-800/30">
-                                            <span className="text-indigo-200 font-medium">Total Quantity</span>
-                                            <span className="font-black text-white">{simItems.reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0)} <span className="text-xs font-normal text-indigo-300">Pcs/Unit</span></span>
-                                        </div>
-                                    </div>
-
-                                    <button onClick={() => {
-                                        if(simTotal <= 0) return alert('Isi dulu harga dan quantity-nya, Tuan!');
-                                        const judul = prompt("Masukkan nama/judul target untuk proyek ini:", "Belanja Kain & Produksi Baru");
-                                        if (!judul) return;
-                                        setActiveTab('targets');
-                                        setTimeout(() => {
-                                            setEditData({ name: judul, targetAmount: simTotal });
-                                            setActiveModal('target');
-                                        }, 300);
-                                    }} className="w-full mt-8 bg-indigo-500 hover:bg-indigo-400 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-900/50 transition-all flex items-center justify-center gap-2 active:scale-95 group">
-                                        <Target size={18} className="group-hover:rotate-12 transition-transform"/> Jadikan Target Bisnis
-                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1535,6 +1534,144 @@ function App() {
                                 </table>
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {/* --- SIMULASI MODAL (ARSIP RAB) --- */}
+                {activeTab === 'simulation' && (
+                    <div className="space-y-8 animate-enter">
+                        {simView === 'list' ? (
+                            // TAMPILAN DAFTAR ARSIP RAB
+                            <div className="space-y-6">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                    <div>
+                                        <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Arsip Rencana Anggaran (RAB)</h2>
+                                        <p className="text-slate-500 mt-1">Data simulasi kebutuhan dana produksi yang tersimpan.</p>
+                                    </div>
+                                    <button onClick={openNewSimulation} className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-500/30 transition">
+                                        <Plus size={18}/> Buat RAB Baru
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {simulations.length === 0 ? (
+                                        <div className="col-span-full py-16 text-center bg-white rounded-3xl border border-dashed border-slate-200">
+                                            <Calculator size={48} className="mx-auto text-slate-300 mb-4"/>
+                                            <p className="text-slate-500 font-bold">Belum ada arsip RAB</p>
+                                            <p className="text-slate-400 text-sm mt-1">Mulai buat simulasi kebutuhan modal Anda.</p>
+                                        </div>
+                                    ) : (
+                                        simulations.map(sim => (
+                                            <div key={sim.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition flex flex-col justify-between group h-full">
+                                                <div>
+                                                    <div className="flex justify-between items-start mb-3">
+                                                        <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-1 rounded uppercase tracking-wider">{formatDate(sim.createdAt)}</span>
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button onClick={() => openEditSimulation(sim)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded"><Edit2 size={14}/></button>
+                                                            <button onClick={() => deleteRecord('simulations', sim.id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded"><Trash2 size={14}/></button>
+                                                        </div>
+                                                    </div>
+                                                    <h3 className="font-bold text-lg text-slate-800 leading-tight mb-4">{sim.title}</h3>
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs text-slate-500 mb-1">Total Kebutuhan</p>
+                                                    <p className="text-2xl font-black text-indigo-700">{formatCurrency(sim.total)}</p>
+                                                    
+                                                    <div className="mt-4 pt-4 border-t border-slate-50 flex gap-2">
+                                                        <button onClick={() => exportSimulationData(sim.items, sim.total, 'excel', sim.title)} className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition"><FileSpreadsheet size={12}/> Excel</button>
+                                                        <button onClick={() => exportSimulationData(sim.items, sim.total, 'pdf', sim.title)} className="flex-1 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition"><FileIcon size={12}/> PDF</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            // TAMPILAN FORM KALKULATOR RAB
+                            <div className="space-y-6">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                    <div>
+                                        <button onClick={() => setSimView('list')} className="text-sm font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 mb-2 transition"><ChevronLeft size={16}/> Kembali ke Arsip</button>
+                                        <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">{currentSimId ? 'Edit RAB' : 'Buat RAB Baru'}</h2>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => exportSimulationData(simItems, simTotal, 'excel', simTitle || 'Draft')} className="px-4 py-2.5 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 font-bold text-sm flex items-center gap-2 transition"><FileSpreadsheet size={16}/> Excel</button>
+                                        <button onClick={() => exportSimulationData(simItems, simTotal, 'pdf', simTitle || 'Draft')} className="px-4 py-2.5 bg-rose-50 text-rose-600 rounded-xl hover:bg-rose-100 font-bold text-sm flex items-center gap-2 transition"><FileIcon size={16}/> PDF</button>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                                    <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Judul Proyek / Simulasi</label>
+                                    <input type="text" placeholder="Contoh: Produksi Legging Agustus, Restok Packaging..." className="w-full text-xl font-bold text-slate-800 border-b-2 border-slate-200 pb-2 outline-none focus:border-indigo-600 transition placeholder:text-slate-300" value={simTitle} onChange={(e) => setSimTitle(e.target.value)} />
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                                    <div className="lg:col-span-2 space-y-4">
+                                        {simItems.map((item, index) => (
+                                            <div key={item.id} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4 items-end animate-enter relative group">
+                                                <div className="absolute -left-3 top-1/2 -translate-y-1/2 bg-slate-800 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow-md z-10">{index + 1}</div>
+                                                <div className="flex-1 w-full pl-2 md:pl-4">
+                                                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Nama Kebutuhan</label>
+                                                    <input type="text" placeholder="Cth: Kain Dri-fit 1 Roll" className="w-full border-b-2 border-slate-100 bg-slate-50 px-4 py-3 rounded-t-xl outline-none focus:bg-indigo-50/50 focus:border-indigo-400 font-bold text-slate-700 transition" value={item.name} onChange={(e) => { const newItems = [...simItems]; newItems[index].name = e.target.value; setSimItems(newItems); }} />
+                                                </div>
+                                                <div className="w-full md:w-44">
+                                                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Harga Satuan (Rp)</label>
+                                                    <input type="number" placeholder="0" className="w-full border-b-2 border-slate-100 bg-slate-50 px-4 py-3 rounded-t-xl outline-none focus:bg-indigo-50/50 focus:border-indigo-400 font-bold text-slate-700 transition" value={item.price} onChange={(e) => { const newItems = [...simItems]; newItems[index].price = e.target.value; setSimItems(newItems); }} />
+                                                </div>
+                                                <div className="w-full md:w-24">
+                                                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Qty</label>
+                                                    <input type="number" min="1" className="w-full border-b-2 border-slate-100 bg-slate-50 px-4 py-3 rounded-t-xl outline-none focus:bg-indigo-50/50 focus:border-indigo-400 font-bold text-slate-700 text-center transition" value={item.qty} onChange={(e) => { const newItems = [...simItems]; newItems[index].qty = e.target.value; setSimItems(newItems); }} />
+                                                </div>
+                                                <button onClick={() => { if(simItems.length > 1) setSimItems(simItems.filter(i => i.id !== item.id)) }} className={`p-3.5 rounded-xl transition w-full md:w-auto flex justify-center ${simItems.length === 1 ? 'bg-slate-50 text-slate-300 cursor-not-allowed' : 'bg-rose-50 text-rose-500 hover:bg-rose-100 shadow-sm'}`} disabled={simItems.length === 1}><Trash2 size={18}/></button>
+                                            </div>
+                                        ))}
+                                        <button onClick={() => setSimItems([...simItems, { id: Date.now(), name: '', price: '', qty: 1 }])} className="w-full py-4 mt-2 border-2 border-dashed border-indigo-200 rounded-[1.5rem] text-indigo-600 font-bold bg-indigo-50/30 hover:bg-indigo-50 hover:border-indigo-400 transition flex items-center justify-center gap-2">
+                                            <Plus size={20}/> Tambah Baris Baru
+                                        </button>
+                                    </div>
+
+                                    <div className="lg:col-span-1">
+                                        <div className="bg-gradient-to-br from-indigo-900 to-slate-900 rounded-[2rem] p-8 text-white shadow-xl lg:sticky lg:top-24 border border-indigo-800/50">
+                                            <div className="flex justify-between items-center mb-6">
+                                                <h3 className="text-indigo-200 text-xs font-bold uppercase tracking-widest">Total Kebutuhan</h3>
+                                                <div className="p-2 bg-indigo-800 rounded-lg text-indigo-300"><Calculator size={20}/></div>
+                                            </div>
+                                            <div className="text-4xl font-black mb-8 tracking-tight">{formatCurrency(simTotal).replace('Rp', 'Rp ')}</div>
+                                            
+                                            <div className="space-y-4 pt-6 border-t border-indigo-800/50">
+                                                <div className="flex justify-between items-center text-sm bg-indigo-950/30 p-3 rounded-xl border border-indigo-800/30">
+                                                    <span className="text-indigo-200 font-medium">Jenis Item</span>
+                                                    <span className="font-black text-white">{simItems.filter(i => i.name || i.price).length} <span className="text-xs font-normal text-indigo-300">Macam</span></span>
+                                                </div>
+                                                <div className="flex justify-between items-center text-sm bg-indigo-950/30 p-3 rounded-xl border border-indigo-800/30">
+                                                    <span className="text-indigo-200 font-medium">Total Quantity</span>
+                                                    <span className="font-black text-white">{simItems.reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0)} <span className="text-xs font-normal text-indigo-300">Pcs/Unit</span></span>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="mt-8 space-y-3">
+                                                <button onClick={handleSaveSimulation} className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-900/50 transition-all flex items-center justify-center gap-2 active:scale-95">
+                                                    <Save size={18}/> Simpan ke Arsip
+                                                </button>
+                                                
+                                                <button onClick={() => {
+                                                    if(simTotal <= 0) return alert('Isi dulu harga dan quantity-nya, Tuan!');
+                                                    if(!simTitle) return alert('Isi Judul Simulasi dulu di atas!');
+                                                    setActiveTab('targets');
+                                                    setTimeout(() => {
+                                                        setEditData({ name: simTitle, targetAmount: simTotal });
+                                                        setActiveModal('target');
+                                                    }, 300);
+                                                }} className="w-full bg-transparent border-2 border-indigo-500 hover:bg-indigo-800 text-indigo-100 font-bold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 active:scale-95">
+                                                    <Target size={18}/> Jadikan Target Bisnis
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
