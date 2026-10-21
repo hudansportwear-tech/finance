@@ -87,7 +87,7 @@ import {
   Plus, Trash2, Edit2, Download, Upload, Printer, X, FileSpreadsheet, File as FileIcon,
   ChevronLeft, ChevronRight, Package, ShoppingCart, Menu, ArrowUpRight, ArrowDownRight, Wallet, Search,
   Sparkles, Bot, Loader2, MoreHorizontal, ArrowRight, CreditCard, PieChart, Activity, Archive, Gift, Truck,
-  AlertTriangle, AlertCircle, Bell, Calculator, List
+  AlertTriangle, AlertCircle, Bell, Calculator, List, Cpu
 } from 'lucide-react';
 
 /* --- FIREBASE CONFIGURATION --- */
@@ -447,10 +447,11 @@ const TransactionForm = ({ type, onClose, initialData, subtype, user, products, 
     );
 };
 
-// --- PRODUCT FORM COMPONENT ---
-const ProductForm = ({ initialData, onSave, onCancel }) => {
-    // State untuk menentukan apakah barang ini punya ukuran baju atau tidak
+// --- PRODUCT FORM COMPONENT DENGAN BILL OF MATERIALS (RESEP) ---
+const ProductForm = ({ initialData, products, onSave, onCancel }) => {
     const [hasSize, setHasSize] = useState(initialData ? (initialData.hasSize !== false) : true);
+    const [category, setCategory] = useState(initialData?.category || 'Produk Jadi');
+    const [recipe, setRecipe] = useState(initialData?.recipe || []);
 
     const submit = (e) => {
         e.preventDefault();
@@ -459,17 +460,17 @@ const ProductForm = ({ initialData, onSave, onCancel }) => {
         const data = {
             name: fd.get('name'),
             sku: fd.get('sku'),
-            category: fd.get('category'),
+            category: category,
             supplier: fd.get('supplier'),
             price: parseFloat(fd.get('price')) || 0,
             cost: parseFloat(fd.get('cost')) || 0,
             hasSize: hasSize,
             stockBS: parseInt(fd.get('stockBS')) || 0,
             sold: parseInt(fd.get('sold')) || 0,
-            free: parseInt(fd.get('free')) || 0
+            free: parseInt(fd.get('free')) || 0,
+            recipe: recipe.filter(r => r.productId && r.qty > 0) // Simpan resep yang valid saja
         };
 
-        // Logika dinamis perhitungan stok total
         if (hasSize) {
             data.stockS = parseInt(fd.get('stockS')) || 0;
             data.stockM = parseInt(fd.get('stockM')) || 0;
@@ -478,7 +479,7 @@ const ProductForm = ({ initialData, onSave, onCancel }) => {
             data.stock = data.stockS + data.stockM + data.stockL + data.stockXL;
         } else {
             data.stock = parseInt(fd.get('stockGeneral')) || 0;
-            data.stockS = 0; data.stockM = 0; data.stockL = 0; data.stockXL = 0; // Reset
+            data.stockS = 0; data.stockM = 0; data.stockL = 0; data.stockXL = 0;
         }
 
         onSave(data, initialData?.id);
@@ -496,7 +497,7 @@ const ProductForm = ({ initialData, onSave, onCancel }) => {
             <div className="grid grid-cols-2 gap-3">
                 <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Kategori</label>
-                    <select name="category" className="w-full border p-3 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={initialData?.category || 'Produk Jadi'}>
+                    <select name="category" value={category} onChange={(e) => setCategory(e.target.value)} className="w-full border p-3 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500">
                         <option value="Produk Jadi">Produk Jadi</option>
                         <option value="Barang Setengah Jadi">Barang Setengah Jadi (WIP)</option>
                         <option value="Asesoris & Packaging">Asesoris & Packaging</option>
@@ -516,6 +517,35 @@ const ProductForm = ({ initialData, onSave, onCancel }) => {
                 <input name="cost" type="number" placeholder="Harga Beli / HPP" className="border p-3 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" defaultValue={initialData?.cost} />
                 <input name="price" type="number" placeholder="Harga Jual" className="border p-3 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" required defaultValue={initialData?.price} />
             </div>
+
+            {/* --- FITUR RESEP (BoM) --- */}
+            {(category === 'Produk Jadi' || category === 'Barang Setengah Jadi') && (
+                <div className="bg-violet-50 p-4 rounded-xl border border-violet-100">
+                    <div className="flex justify-between items-center mb-3">
+                        <label className="text-xs font-bold text-violet-700 uppercase">Resep Produksi (BOM per 1 Pcs)</label>
+                        <button type="button" onClick={() => setRecipe([...recipe, {productId: '', qty: 1}])} className="text-[10px] font-bold bg-violet-200 text-violet-700 px-2 py-1 rounded flex items-center gap-1 hover:bg-violet-300 transition">
+                            <Plus size={12}/> Tambah Bahan
+                        </button>
+                    </div>
+                    {recipe.length === 0 && <p className="text-[10px] text-violet-500 italic mb-2">Tambahkan bahan jika barang ini dirakit/diproduksi dari barang lain di gudang (Misal: Butuh 1 WIP + 1 Kardus).</p>}
+                    
+                    <div className="space-y-2">
+                        {recipe.map((r, i) => (
+                            <div key={i} className="flex gap-2 items-center bg-white p-2 rounded-lg border border-violet-200 shadow-sm">
+                                <select value={r.productId} onChange={(e) => {const nr = [...recipe]; nr[i].productId = e.target.value; setRecipe(nr);}} className="flex-1 outline-none text-xs font-medium text-slate-700" required>
+                                    <option value="">- Pilih Bahan/Material -</option>
+                                    {products.filter(p => p.id !== initialData?.id).map(p => <option key={p.id} value={p.id}>{p.name} (Stok: {p.stock})</option>)}
+                                </select>
+                                <div className="flex items-center gap-1 bg-slate-50 rounded px-2">
+                                    <input type="number" step="0.01" value={r.qty} onChange={(e) => {const nr = [...recipe]; nr[i].qty = parseFloat(e.target.value)||0; setRecipe(nr);}} className="w-12 bg-transparent py-1 text-xs font-bold text-center outline-none" required />
+                                    <span className="text-[10px] text-slate-400 font-bold">Pcs</span>
+                                </div>
+                                <button type="button" onClick={() => {const nr = [...recipe]; nr.splice(i, 1); setRecipe(nr);}} className="text-rose-400 hover:text-rose-600 p-1"><X size={14}/></button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
             
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <label className="text-xs font-bold text-slate-600 uppercase mb-3 block">Rincian Stok Awal (Siap Pakai/Jual)</label>
@@ -560,8 +590,6 @@ function App() {
   const [targets, setTargets] = useState([]);
   const [products, setProducts] = useState([]);
   const [productions, setProductions] = useState([]);
-  
-  // NEW: State untuk Simulasi Modal / RAB Database
   const [simulations, setSimulations] = useState([]);
 
   // UI State
@@ -574,12 +602,16 @@ function App() {
   const [warehouseFilter, setWarehouseFilter] = useState('Semua'); 
   
   // Kalkulator Simulasi State (Form Data)
-  const [simView, setSimView] = useState('list'); // 'list' atau 'form'
+  const [simView, setSimView] = useState('list');
   const [simTitle, setSimTitle] = useState('');
   const [currentSimId, setCurrentSimId] = useState(null);
   const [simItems, setSimItems] = useState([{ id: Date.now(), name: '', price: '', qty: 1 }]);
   const simTotal = simItems.reduce((acc, curr) => acc + (parseFloat(curr.price) || 0) * (parseInt(curr.qty) || 0), 0);
   
+  // State khusus Modal BoM (Hitung Otomatis)
+  const [bomTargetProd, setBomTargetProd] = useState('');
+  const [bomTargetQty, setBomTargetQty] = useState(100);
+
   // AI
   const [showAdvisor, setShowAdvisor] = useState(false);
   const [advisorAnalysis, setAdvisorAnalysis] = useState('');
@@ -622,7 +654,6 @@ function App() {
         onSnapshot(collection(db, ...basePath, 'targets'), s => setTargets(s.docs.map(d => ({id:d.id, ...d.data()})))),
         onSnapshot(collection(db, ...basePath, 'products'), s => setProducts(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => a.name.localeCompare(b.name)))),
         onSnapshot(collection(db, ...basePath, 'productions'), s => setProductions(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.startDate)-new Date(a.startDate)))),
-        // Listener baru untuk simulasi/RAB
         onSnapshot(collection(db, ...basePath, 'simulations'), s => setSimulations(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => new Date(b.createdAt)-new Date(a.createdAt))))
     ];
     return () => subs.forEach(unsub => unsub());
@@ -675,7 +706,6 @@ function App() {
       return stats;
   }, [transactions]);
 
-  // Memoize barang yang stoknya menipis
   const lowStockProducts = useMemo(() => {
       return products.filter(p => (parseInt(p.stock) || 0) <= 5);
   }, [products]);
@@ -718,7 +748,6 @@ function App() {
       else await addRecord('transactions', data); 
   };
 
-  // FUNGSI ARSIP SIMULASI RAB
   const handleSaveSimulation = async () => {
         if (!simTitle.trim()) return alert('Isi Judul Simulasi/RAB dulu, Tuan!');
         const validItems = simItems.filter(i => i.name.trim() !== '');
@@ -780,6 +809,42 @@ function App() {
             pdfData.push(["", "TOTAL KESELURUHAN", "", "", formatCurrency(total)]);
             exportToPDF(headers, pdfData, `RAB - ${title}`);
         }
+  };
+
+  // LOGIKA HITUNG BOM OTOMATIS
+  const handleCalculateBom = (e) => {
+      e.preventDefault();
+      const prod = products.find(p => p.id === bomTargetProd);
+      if(!prod || !prod.recipe || prod.recipe.length === 0) return alert("Pilih produk dengan resep yang valid!");
+      
+      const newItems = [];
+      prod.recipe.forEach(ing => {
+          const mat = products.find(p => p.id === ing.productId);
+          if(mat) {
+              const reqQty = ing.qty * bomTargetQty;
+              const stock = parseInt(mat.stock) || 0;
+              const shortage = reqQty - stock;
+              
+              if(shortage > 0) {
+                  newItems.push({
+                      id: Date.now() + Math.random(),
+                      name: `Bahan untuk ${prod.name}: ${mat.name}`,
+                      price: mat.cost || 0, // Mengambil Harga Beli/HPP material
+                      qty: Math.ceil(shortage) // Dibulatkan ke atas
+                  });
+              }
+          }
+      });
+
+      if(newItems.length === 0) {
+          alert(`Stok gudang masih sangat cukup untuk memproduksi ${bomTargetQty} pcs ${prod.name}! Tidak ada yang perlu dibeli.`);
+      } else {
+          // Hanya simpan row yang sudah diisi sebelumnya, buang row kosong bawaan
+          const currentValid = simItems.filter(i => i.name.trim() !== '');
+          setSimItems([...currentValid, ...newItems]);
+          alert(`Sistem menemukan ${newItems.length} jenis bahan yang stoknya kurang. Data telah ditambahkan ke RAB.`);
+      }
+      setActiveModal(null);
   };
   
   const handlePayReceivable = async (r) => { 
@@ -1596,6 +1661,10 @@ function App() {
                                         <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">{currentSimId ? 'Edit RAB' : 'Buat RAB Baru'}</h2>
                                     </div>
                                     <div className="flex gap-2">
+                                        {/* TOMBOL BOM / RESEP OTOMATIS */}
+                                        <button onClick={() => setActiveModal('bom_calc')} className="px-4 py-2.5 bg-violet-600 text-white rounded-xl hover:bg-violet-700 font-bold text-sm flex items-center gap-2 transition shadow-lg shadow-violet-500/30">
+                                            <Cpu size={16}/> Hitung Otomatis (Dari Resep)
+                                        </button>
                                         <button onClick={() => exportSimulationData(simItems, simTotal, 'excel', simTitle || 'Draft')} className="px-4 py-2.5 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 font-bold text-sm flex items-center gap-2 transition"><FileSpreadsheet size={16}/> Excel</button>
                                         <button onClick={() => exportSimulationData(simItems, simTotal, 'pdf', simTitle || 'Draft')} className="px-4 py-2.5 bg-rose-50 text-rose-600 rounded-xl hover:bg-rose-100 font-bold text-sm flex items-center gap-2 transition"><FileIcon size={16}/> PDF</button>
                                     </div>
@@ -1621,13 +1690,13 @@ function App() {
                                                 </div>
                                                 <div className="w-full md:w-24">
                                                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Qty</label>
-                                                    <input type="number" min="1" className="w-full border-b-2 border-slate-100 bg-slate-50 px-4 py-3 rounded-t-xl outline-none focus:bg-indigo-50/50 focus:border-indigo-400 font-bold text-slate-700 text-center transition" value={item.qty} onChange={(e) => { const newItems = [...simItems]; newItems[index].qty = e.target.value; setSimItems(newItems); }} />
+                                                    <input type="number" min="0" step="0.01" className="w-full border-b-2 border-slate-100 bg-slate-50 px-4 py-3 rounded-t-xl outline-none focus:bg-indigo-50/50 focus:border-indigo-400 font-bold text-slate-700 text-center transition" value={item.qty} onChange={(e) => { const newItems = [...simItems]; newItems[index].qty = e.target.value; setSimItems(newItems); }} />
                                                 </div>
                                                 <button onClick={() => { if(simItems.length > 1) setSimItems(simItems.filter(i => i.id !== item.id)) }} className={`p-3.5 rounded-xl transition w-full md:w-auto flex justify-center ${simItems.length === 1 ? 'bg-slate-50 text-slate-300 cursor-not-allowed' : 'bg-rose-50 text-rose-500 hover:bg-rose-100 shadow-sm'}`} disabled={simItems.length === 1}><Trash2 size={18}/></button>
                                             </div>
                                         ))}
                                         <button onClick={() => setSimItems([...simItems, { id: Date.now(), name: '', price: '', qty: 1 }])} className="w-full py-4 mt-2 border-2 border-dashed border-indigo-200 rounded-[1.5rem] text-indigo-600 font-bold bg-indigo-50/30 hover:bg-indigo-50 hover:border-indigo-400 transition flex items-center justify-center gap-2">
-                                            <Plus size={20}/> Tambah Baris Baru
+                                            <Plus size={20}/> Tambah Baris Baru Secara Manual
                                         </button>
                                     </div>
 
@@ -1646,7 +1715,7 @@ function App() {
                                                 </div>
                                                 <div className="flex justify-between items-center text-sm bg-indigo-950/30 p-3 rounded-xl border border-indigo-800/30">
                                                     <span className="text-indigo-200 font-medium">Total Quantity</span>
-                                                    <span className="font-black text-white">{simItems.reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0)} <span className="text-xs font-normal text-indigo-300">Pcs/Unit</span></span>
+                                                    <span className="font-black text-white">{simItems.reduce((acc, curr) => acc + (parseFloat(curr.qty) || 0), 0)} <span className="text-xs font-normal text-indigo-300">Unit</span></span>
                                                 </div>
                                             </div>
                                             
@@ -1821,12 +1890,45 @@ function App() {
         <Modal isOpen={activeModal === 'product'} onClose={() => setActiveModal(null)} title={editData ? "Edit Data Barang" : "Barang / Material Baru"}>
             <ProductForm 
                 initialData={editData} 
+                products={products}
                 onSave={(data, id) => {
                     if(id) updateRecord('products', id, data); 
                     else addRecord('products', data);
                     setActiveModal(null);
                 }} 
             />
+        </Modal>
+
+        {/* MODAL HITUNG BOM */}
+        <Modal isOpen={activeModal === 'bom_calc'} onClose={() => setActiveModal(null)} title="Hitung Kebutuhan Otomatis (BoM)">
+            <form onSubmit={handleCalculateBom} className="space-y-5">
+                <div className="bg-violet-50 border border-violet-100 p-4 rounded-2xl flex gap-3 text-violet-800 text-sm font-medium">
+                    <Cpu size={24} className="shrink-0 text-violet-500" />
+                    <p>Sistem akan otomatis menghitung bahan yang <b>kurang di gudang</b> berdasarkan resep produksi barang yang Anda pilih.</p>
+                </div>
+                
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Pilih Barang yang Mau Diproduksi</label>
+                    <select className="w-full bg-white border-2 border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-violet-500 transition font-bold text-slate-700" value={bomTargetProd} onChange={e => setBomTargetProd(e.target.value)} required>
+                        <option value="">-- Silakan Pilih --</option>
+                        {products.filter(p => p.recipe && p.recipe.length > 0).map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                    </select>
+                    {products.filter(p => p.recipe && p.recipe.length > 0).length === 0 && (
+                        <p className="text-[10px] text-rose-500 mt-1 italic">Anda belum membuat "Resep Produksi" pada produk apapun di gudang.</p>
+                    )}
+                </div>
+
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Target Jumlah Produksi (Pcs/Unit)</label>
+                    <input type="number" min="1" className="w-full bg-white border-2 border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-violet-500 transition font-bold text-xl text-slate-800" value={bomTargetQty} onChange={e => setBomTargetQty(parseInt(e.target.value)||1)} required />
+                </div>
+
+                <button type="submit" className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-violet-500/30 transition-transform active:scale-95 flex items-center justify-center gap-2">
+                    <Calculator size={18}/> Eksekusi Perhitungan
+                </button>
+            </form>
         </Modal>
 
         <Modal isOpen={activeModal === 'import'} onClose={() => setActiveModal(null)} title="Import Data">
