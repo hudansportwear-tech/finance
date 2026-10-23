@@ -468,7 +468,7 @@ const ProductForm = ({ initialData, products, onSave, onCancel }) => {
             stockBS: parseInt(fd.get('stockBS')) || 0,
             sold: parseInt(fd.get('sold')) || 0,
             free: parseInt(fd.get('free')) || 0,
-            recipe: recipe.filter(r => r.productId && r.qty > 0) // Simpan resep yang valid saja
+            recipe: recipe.filter(r => r.productId && r.qty > 0) 
         };
 
         if (hasSize) {
@@ -710,6 +710,17 @@ function App() {
       return products.filter(p => (parseInt(p.stock) || 0) <= 5);
   }, [products]);
 
+  // NEW: Filtered Products Memoization for Display & Export
+  const filteredProducts = useMemo(() => {
+      return products
+          .filter(p => {
+              if (warehouseFilter === 'Semua') return true;
+              if (warehouseFilter === 'Kritis') return p.stock <= 5;
+              return (p.category || 'Produk Jadi') === warehouseFilter;
+          })
+          .filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase()));
+  }, [products, warehouseFilter, prodSearch]);
+
   /* --- CRUD & LOGIC --- */
   const getCollectionRef = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
   const getDocRef = (colName, docId) => doc(db, 'artifacts', appId, 'public', 'data', colName, docId);
@@ -829,8 +840,8 @@ function App() {
                   newItems.push({
                       id: Date.now() + Math.random(),
                       name: `Bahan untuk ${prod.name}: ${mat.name}`,
-                      price: mat.cost || 0, // Mengambil Harga Beli/HPP material
-                      qty: Math.ceil(shortage) // Dibulatkan ke atas
+                      price: mat.cost || 0,
+                      qty: Math.ceil(shortage) 
                   });
               }
           }
@@ -839,12 +850,62 @@ function App() {
       if(newItems.length === 0) {
           alert(`Stok gudang masih sangat cukup untuk memproduksi ${bomTargetQty} pcs ${prod.name}! Tidak ada yang perlu dibeli.`);
       } else {
-          // Hanya simpan row yang sudah diisi sebelumnya, buang row kosong bawaan
           const currentValid = simItems.filter(i => i.name.trim() !== '');
           setSimItems([...currentValid, ...newItems]);
           alert(`Sistem menemukan ${newItems.length} jenis bahan yang stoknya kurang. Data telah ditambahkan ke RAB.`);
       }
       setActiveModal(null);
+  };
+
+  // NEW: Export Gudang Handlers
+  const handleExportWarehouseExcel = () => {
+      if (filteredProducts.length === 0) return alert("Tidak ada data untuk diexport!");
+      const exportData = filteredProducts.map((p, index) => ({
+          "No": index + 1,
+          "SKU": p.sku || '-',
+          "Kategori": p.category || 'Produk Jadi',
+          "Nama Barang": p.name,
+          "Tipe": p.hasSize !== false ? "Baju/Celana" : "Asesoris",
+          "S": p.hasSize !== false ? (p.stockS || 0) : '-',
+          "M": p.hasSize !== false ? (p.stockM || 0) : '-',
+          "L": p.hasSize !== false ? (p.stockL || 0) : '-',
+          "XL": p.hasSize !== false ? (p.stockXL || 0) : '-',
+          "Total Stok": p.stock || 0,
+          "Terjual": p.sold || 0,
+          "BS/Reject": p.stockBS || 0,
+          "Gratis/Sample": p.free || 0,
+          "Harga Beli (HPP)": p.cost || 0,
+          "Harga Jual": p.price || 0,
+          "Nilai Aset": (p.stock || 0) * (p.cost || 0)
+      }));
+      
+      const totalAset = filteredProducts.reduce((acc, p) => acc + ((p.stock || 0) * (p.cost || 0)), 0);
+      exportData.push({
+          "No": "", "SKU": "", "Kategori": "", "Nama Barang": "TOTAL KESELURUHAN", "Tipe": "", 
+          "S": "", "M": "", "L": "", "XL": "", "Total Stok": "", "Terjual": "", "BS/Reject": "", "Gratis/Sample": "", 
+          "Harga Beli (HPP)": "", "Harga Jual": "", "Nilai Aset": totalAset
+      });
+
+      exportToExcel(exportData, `Rekap_Gudang_${warehouseFilter.replace(/ /g, "_")}`);
+  };
+
+  const handleExportWarehousePDF = () => {
+      if (filteredProducts.length === 0) return alert("Tidak ada data untuk diexport!");
+      const headers = ["No", "Nama Barang", "Kategori", "Total Stok", "Terjual", "Harga Jual", "Nilai Aset"];
+      const pdfData = filteredProducts.map((p, index) => [
+          index + 1,
+          p.name,
+          p.category || 'Produk Jadi',
+          p.stock || 0,
+          p.sold || 0,
+          formatCurrency(p.price || 0),
+          formatCurrency((p.stock || 0) * (p.cost || 0))
+      ]);
+      
+      const totalAset = filteredProducts.reduce((acc, p) => acc + ((p.stock || 0) * (p.cost || 0)), 0);
+      pdfData.push(["", "TOTAL KESELURUHAN", "", "", "", "", formatCurrency(totalAset)]);
+      
+      exportToPDF(headers, pdfData, `Rekap Gudang - ${warehouseFilter}`);
   };
   
   const handlePayReceivable = async (r) => { 
@@ -1400,9 +1461,11 @@ function App() {
                                 <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Stok Gudang</h2>
                                 <p className="text-slate-500 mt-1">Inventaris, BS, & Logistik.</p>
                             </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => {setEditData(null); setImportTypeState('products'); setActiveModal('import')}} className="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-bold text-sm shadow-sm flex items-center gap-2"><Upload size={18}/> Import</button>
-                                <button onClick={() => {setEditData(null); setActiveModal('product')}} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 shadow-lg font-bold text-sm flex items-center gap-2"><Plus size={18}/> Produk Baru</button>
+                            <div className="flex gap-2 flex-wrap justify-end">
+                                <button onClick={handleExportWarehouseExcel} className="px-4 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl hover:bg-emerald-100 font-bold text-xs flex items-center gap-2 shadow-sm transition"><FileSpreadsheet size={16}/> Rekap Excel</button>
+                                <button onClick={handleExportWarehousePDF} className="px-4 py-2.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl hover:bg-rose-100 font-bold text-xs flex items-center gap-2 shadow-sm transition"><FileIcon size={16}/> Rekap PDF</button>
+                                <button onClick={() => {setEditData(null); setImportTypeState('products'); setActiveModal('import')}} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-bold text-xs shadow-sm flex items-center gap-2 transition"><Upload size={16}/> Import</button>
+                                <button onClick={() => {setEditData(null); setActiveModal('product')}} className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 shadow-lg font-bold text-xs flex items-center gap-2 transition"><Plus size={16}/> Produk Baru</button>
                             </div>
                         </div>
 
@@ -1449,15 +1512,7 @@ function App() {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {products
-                                .filter(p => {
-                                    if (warehouseFilter === 'Semua') return true;
-                                    if (warehouseFilter === 'Kritis') return p.stock <= 5;
-                                    return (p.category || 'Produk Jadi') === warehouseFilter;
-                                })
-                                .filter(p => p.name.toLowerCase().includes(prodSearch.toLowerCase()))
-                                .map(p => {
-                                const stats = productStats[p.id] || { sold: 0, given: 0 };
+                            {filteredProducts.map(p => {
                                 const isCritical = p.stock <= 5;
                                 const isOutOfStock = p.stock === 0;
 
