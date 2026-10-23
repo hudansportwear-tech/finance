@@ -822,26 +822,38 @@ function App() {
         }
   };
 
-  // LOGIKA HITUNG BOM OTOMATIS
+// LOGIKA HITUNG BOM OTOMATIS (VERSI TARGET TOTAL GUDANG)
   const handleCalculateBom = (e) => {
       e.preventDefault();
       const prod = products.find(p => p.id === bomTargetProd);
       if(!prod || !prod.recipe || prod.recipe.length === 0) return alert("Pilih produk dengan resep yang valid!");
       
+      // 1. Cek stok produk jadi saat ini
+      const currentReadyStock = parseInt(prod.stock) || 0;
+      
+      // 2. Hitung berapa kekurangannya yang harus diproduksi
+      const qtyToProduce = Math.max(0, bomTargetQty - currentReadyStock);
+
+      if (qtyToProduce === 0) {
+          setActiveModal(null);
+          return alert(`Stok ${prod.name} saat ini (${currentReadyStock} pcs) sudah memenuhi target (${bomTargetQty} pcs). Tidak perlu ada produksi baru!`);
+      }
+      
       const newItems = [];
       prod.recipe.forEach(ing => {
           const mat = products.find(p => p.id === ing.productId);
           if(mat) {
-              const reqQty = ing.qty * bomTargetQty;
+              // 3. Kalikan resep dengan jumlah yang HANYA PERLU DIPRODUKSI
+              const reqQty = ing.qty * qtyToProduce; 
               const stock = parseInt(mat.stock) || 0;
               const shortage = reqQty - stock;
               
               if(shortage > 0) {
                   newItems.push({
                       id: Date.now() + Math.random(),
-                      name: `Bahan untuk ${prod.name}: ${mat.name}`,
-                      price: mat.cost || 0,
-                      qty: Math.ceil(shortage) 
+                      name: `Bahan untuk produksi ${qtyToProduce} ${prod.name}: ${mat.name}`,
+                      price: mat.cost || 0, // Harga Beli/HPP material
+                      qty: Math.ceil(shortage) // Dibulatkan ke atas
                   });
               }
           }
